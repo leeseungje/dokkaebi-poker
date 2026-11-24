@@ -1,0 +1,22 @@
+{
+  "name": "dokkaebi-poker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "도깨비 장터에서 포커 족보로 요괴를 물리치는 싱글 덱빌딩 로그라이크",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "sim": "vite-node scripts/sim.ts",
+    "deploy": "npm test && npm run build && node scripts/deploy.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.6",
+    "vite-node": "^3.2.4",
+    "vitest": "^3.2.7"
+  }
+}
