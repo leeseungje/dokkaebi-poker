@@ -1809,3 +1809,32 @@ button {
   margin-top: 0;
   align-self: end;
 }
+
+/* 세로 상점: 물건이 많아도 아래 버튼이 항상 보이도록 목록만 스크롤 */
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.portrait .shop {
+  overflow: hidden;
+}
+.portrait .shop-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  gap: 8px;
+  padding-right: 2px;
+}
+.portrait .shop-foot {
+  flex: none;
+  margin-top: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.portrait .shop-foot .btn {
+  padding: 12px 10px;
+  font-size: 17px;
+}

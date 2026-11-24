@@ -925,8 +925,12 @@ function renderShop() {
       h('div', { class: 'bubble' }, merchantLine),
       h('div', { class: 'shop-title' }, h('b', null, '도깨비 장터'), h('span', null, `${s.ante}구역 요괴: ${thisBoss.icon} ${thisBoss.name}`)),
     ),
-    h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '부적'), ...charms.map(([it, i]) => itemView(it, i)), charms.length ? null : h('p', { class: 'dim' }, '부적이 다 팔렸어요')),
-    h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '소모품'), ...cons.map(([it, i]) => itemView(it, i))),
+    h(
+      'div',
+      { class: 'shop-list' },
+      h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '부적'), ...charms.map(([it, i]) => itemView(it, i)), charms.length ? null : h('p', { class: 'dim' }, '부적이 다 팔렸어요')),
+      h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '소모품'), ...cons.map(([it, i]) => itemView(it, i))),
+    ),
     h(
       'div',
       { class: 'shop-foot' },
