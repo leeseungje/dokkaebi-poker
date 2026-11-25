@@ -381,6 +381,12 @@ class Audio {
     this.pluck(noteHz(9, 0), { when: 0.32, vol: 0.18, decay: 1.2 });
     this.tone(noteHz(9, 1), { when: 0.32, vol: 0.04, dur: 0.8, type: 'sine' });
   }
+  /** 아궁이: 불꽃이 확 타오르는 소리 */
+  burn() {
+    this.noise({ vol: 0.22, dur: 0.45, freq: 800, freqEnd: 3200, q: 0.5, type: 'lowpass' });
+    for (let i = 0; i < 6; i++) this.noise({ when: 0.05 + i * 0.06, vol: 0.08, dur: 0.04, freq: 2500 + Math.random() * 2500, q: 2 });
+    this.drum({ when: 0.02, vol: 0.2, pitch: 70 });
+  }
   /** 카드가 덱에 들어갈 때 */
   cardAdd() {
     this.noise({ vol: 0.16, dur: 0.12, freq: 1200, freqEnd: 4200, q: 0.9 });

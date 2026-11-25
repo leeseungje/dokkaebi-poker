@@ -473,9 +473,13 @@ export class Run {
     return c;
   }
 
+  /** 소모품 한 번 쓰는 동안 새로 생긴 카드 (화면에 보여 주기용) */
+  private justAdded: Card[] = [];
+
   private addCard(c: Card): Card {
     const card: Card = { ...c, id: this.s.nextCardId++ };
     this.s.deck.push(card);
+    this.justAdded.push(card);
     return card;
   }
 
@@ -552,7 +556,7 @@ export class Run {
   }
 
   /** 보따리에서 고르기. 방망이·도장은 targets 에서 카드를 골라 바로 쓴다 */
-  pickPack(index: number, ids: number[] = []): { ok: true; note: string; added?: Card } | Fail {
+  pickPack(index: number, ids: number[] = []): { ok: true; note: string; added?: Card; made: Card[] } | Fail {
     const s = this.s;
     const p = s.pack;
     if (!p) return { error: '열린 보따리가 없어요' };
@@ -560,6 +564,7 @@ export class Run {
     if (!o || o.taken) return { error: '고를 수 없어요' };
     let note = '';
     let added: Card | undefined;
+    this.justAdded = [];
     if (o.kind === 'card' && o.card) {
       added = this.addCard(o.card);
       note = '덱에 카드를 넣었어요';
@@ -576,7 +581,7 @@ export class Run {
     o.taken = true;
     p.picksLeft -= 1;
     if (p.picksLeft <= 0 || p.options.every((x) => x.taken)) s.pack = null;
-    return { ok: true, note, added };
+    return { ok: true, note, added, made: o.kind === 'cons' ? [...this.justAdded] : [] };
   }
 
   skipPack() {
@@ -650,15 +655,16 @@ export class Run {
   }
 
   /** 가진 소모품 사용. 카드를 고르는 것은 판 중에만 (손패에서 고른다) */
-  useCons(i: number, ids: number[] = []): { ok: true; note: string } | Fail {
+  useCons(i: number, ids: number[] = []): { ok: true; note: string; added: Card[] } | Fail {
     const s = this.s;
     const key = s.consumables[i];
     if (!key) return { error: '없는 소모품이에요' };
     if (s.phase === 'lost' || s.phase === 'won') return { error: '판이 끝났어요' };
+    this.justAdded = [];
     const r = this.applyCons(key, ids, 'hand');
     if ('error' in r) return r;
     s.consumables.splice(i, 1);
-    return r;
+    return { ...r, added: [...this.justAdded] };
   }
 
   /** 소모품 효과. from=hand 면 손패에서, pack 이면 보따리가 보여 준 카드에서 고른다 */

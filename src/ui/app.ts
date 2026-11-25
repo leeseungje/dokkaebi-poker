@@ -146,7 +146,7 @@ function fit() {
 // ───────── 카드
 
 function cardFace(c: Card): HTMLElement {
-  const seal = c.seal ? h('div', { class: `seal seal-${c.seal}`, title: SEAL_INFO[c.seal].desc }, '印') : null;
+  const seal = c.seal ? h('div', { class: `card-seal seal-${c.seal}`, title: SEAL_INFO[c.seal].desc }, '印') : null;
   if (c.enh === 'stone')
     return h(
       'div',
@@ -395,7 +395,7 @@ function renderCharms() {
       const d = consDef(k);
       const el = h(
         'div',
-        { class: `cons ${d.kind}`, tabindex: 0 },
+        { class: `cons kind-${d.kind}`, tabindex: 0 },
         h('div', { class: 'ico' }, d.icon),
         h('div', { class: 'nm' }, d.name),
         h('div', { class: 'tip' }, h('b', null, `${d.icon} ${d.name}`), h('p', null, d.desc)),
@@ -490,7 +490,7 @@ function openConsMenu(k: ConsKey, i: number, el: HTMLElement) {
   );
 }
 
-function useCons(i: number) {
+async function useCons(i: number) {
   if (!run || busy) return;
   const ids = consDef(run.s.consumables[i]).select[0] > 0 ? [...selected] : [];
   const k = run.s.consumables[i];
@@ -503,15 +503,50 @@ function useCons(i: number) {
   if (k.startsWith('book:')) audio.levelUp();
   audio.magic();
   toast(r.note);
-  for (const id of ids) {
-    const el = cardEls.get(id);
-    if (el) replay(el, 'zap');
-  }
+  save();
+  if (k === 'burn') {
+    // 태운 카드는 타 없어지는 연출 뒤에 치운다
+    busy = true;
+    for (const id of ids) cardEls.get(id)?.classList.add('shatter');
+    audio.burn();
+    await wait(480);
+    busy = false;
+  } else
+    for (const id of ids) {
+      const el = cardEls.get(id);
+      if (el) replay(el, 'zap');
+    }
   for (const c of run.s.deck) refreshCardEl(c);
   if (k === 'copy' || k === 'burn') selected = [];
-  void syncHand();
   renderAll();
-  save();
+  await syncHand();
+  // 손으로 들어오지 않고 덱에 섞인 새 카드는 한눈에 보여 준다
+  const toDeck = r.added.filter((c) => !run!.s.hand.includes(c.id));
+  if (toDeck.length) await showAdded(toDeck);
+}
+
+/** 새로 생긴 카드를 가운데에 잠깐 보여 준 뒤 덱 더미로 날려 보낸다 */
+async function showAdded(cards: Card[]) {
+  if (!cards.length) return;
+  const box = h(
+    'div',
+    { class: 'reveal' },
+    h('b', null, '덱에 새 카드 ' + cards.length + '장이 들어가요'),
+    h('div', { class: 'reveal-row' }, ...cards.map((c, i) => h('div', { class: 'pcard', style: 'animation-delay:' + i * 80 + 'ms' }, cardFace(c)))),
+  );
+  stage.append(box);
+  audio.cardAdd();
+  await wait(1300);
+  const r = stageRect(box);
+  const pile = stageRect(deckPile);
+  const visible = getComputedStyle(deckPile).display !== 'none';
+  box.style.setProperty('--dx', (visible ? pile.x + pile.w / 2 - (r.x + r.w / 2) : 0) + 'px');
+  box.style.setProperty('--dy', (visible ? pile.y + pile.h / 2 - (r.y + r.h / 2) : 0) + 'px');
+  box.classList.add('leave');
+  audio.whoosh(0);
+  await wait(500);
+  box.remove();
+  renderSide();
 }
 
 function sellCons(i: number) {
@@ -1166,6 +1201,8 @@ function pickPack(i: number) {
   merchantLine = run.s.pack ? '하나 더 골라 보게!' : pickLine('buy');
   renderAll();
   save();
+  const made = r.made.filter((c) => !run!.s.pack?.targets.includes(c.id));
+  if (made.length) void showAdded(made);
 }
 
 function skipPack() {
