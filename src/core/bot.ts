@@ -61,7 +61,18 @@ export function shopBot(run: Run) {
     if (it.sold) continue;
     run.haggle(i);
     if (it.kind === 'cons' && consDef(it.key as never).select[0] > 0) continue;
-    if (s.money - it.price >= (s.ante >= 3 ? 5 : 0)) run.buy(i);
+    if (s.money - it.price < (s.ante >= 3 ? 5 : 0)) continue;
+    run.buy(i);
+    // 보따리: 카드·비급·부적은 첫 번째 것, 방망이·도장은 보이는 카드에 바로
+    while (s.pack) {
+      const p = s.pack;
+      const k = p.options.findIndex((o) => !o.taken);
+      if (k < 0) break;
+      const o = p.options[k];
+      const need = o.kind === 'cons' ? consDef(o.key as never).select : [0, 0];
+      const res = run.pickPack(k, p.targets.slice(0, need[1]));
+      if ('error' in res) run.skipPack();
+    }
   }
   for (let i = s.consumables.length - 1; i >= 0; i--) if (consDef(s.consumables[i]).select[0] === 0) run.useCons(i);
   run.nextRound();

@@ -1,5 +1,5 @@
 // 도깨비 부적: 점수 계산 규칙을 비트는 특수 카드 (최대 5장)
-import { type Card, isFace } from './cards';
+import { type Card, hasSuit, isBlack, isFace, isRed, isStone, SUITS } from './cards';
 import type { HandResult, HandType } from './hands';
 import type { Rng } from './rng';
 
@@ -28,6 +28,12 @@ export interface ScoreEnv {
   /** 이번 판에 버린 카드 수 */
   discarded: number;
   isBoss: boolean;
+  /** 덱 정보 (덱을 보는 부적용) */
+  deckSize: number;
+  deckStone: number;
+  deckEnhanced: number;
+  /** 행운 카드 확률 배수 (노름꾼) */
+  luck: number;
 }
 
 export interface Ctx {
@@ -77,7 +83,7 @@ export const CHARMS = {
     rarity: 1,
     price: 5,
     desc: () => '♥ 카드가 점수에 들어갈 때마다 +3배',
-    card: (c) => (c.suit === 'H' ? { mult: 3 } : undefined),
+    card: (c) => (hasSuit(c, 'H') ? { mult: 3 } : undefined),
   },
   inkTalisman: {
     name: '먹 부적',
@@ -85,7 +91,7 @@ export const CHARMS = {
     rarity: 1,
     price: 5,
     desc: () => '♠ 카드가 점수에 들어갈 때마다 +25끗',
-    card: (c) => (c.suit === 'S' ? { chips: 25 } : undefined),
+    card: (c) => (hasSuit(c, 'S') ? { chips: 25 } : undefined),
   },
   coinTalisman: {
     name: '엽전 부적',
@@ -93,7 +99,7 @@ export const CHARMS = {
     rarity: 2,
     price: 6,
     desc: () => '♦ 카드가 점수에 들어갈 때마다 1/2 확률로 +1냥',
-    card: (c, ctx) => (c.suit === 'D' && ctx.rng.chance(0.5) ? { money: 1 } : undefined),
+    card: (c, ctx) => (hasSuit(c, 'D') && ctx.rng.chance(0.5) ? { money: 1 } : undefined),
   },
   plumTalisman: {
     name: '매화 부적',
@@ -101,7 +107,7 @@ export const CHARMS = {
     rarity: 2,
     price: 6,
     desc: () => '손에 남은 ♣ 카드마다 ×1.2배',
-    held: (c) => (c.suit === 'C' ? { xmult: 1.2 } : undefined),
+    held: (c) => (hasSuit(c, 'C') ? { xmult: 1.2 } : undefined),
   },
   pouch: {
     name: '엽전 꾸러미',
@@ -168,7 +174,7 @@ export const CHARMS = {
     rarity: 2,
     price: 6,
     desc: () => '7 카드가 점수에 들어갈 때마다 ×1.5배',
-    card: (c) => (c.rank === 7 ? { xmult: 1.5 } : undefined),
+    card: (c) => (!isStone(c) && c.rank === 7 ? { xmult: 1.5 } : undefined),
   },
   moonJar: {
     name: '달항아리',
@@ -270,6 +276,130 @@ export const CHARMS = {
     price: 6,
     desc: () => '손에 남은 카드 1장마다 +2배',
     held: () => ({ mult: 2 }),
+  },
+  stonemason: {
+    name: '석수장이',
+    icon: '🪨',
+    rarity: 2,
+    price: 6,
+    desc: () => '덱의 돌 카드 1장마다 +25끗',
+    hand: (ctx) => (ctx.env.deckStone > 0 ? { chips: ctx.env.deckStone * 25 } : undefined),
+  },
+  dancheong: {
+    name: '단청장',
+    icon: '🎨',
+    rarity: 2,
+    price: 6,
+    desc: () => '덱에서 각인된 카드 1장마다 +1배',
+    hand: (ctx) => (ctx.env.deckEnhanced > 0 ? { mult: ctx.env.deckEnhanced } : undefined),
+  },
+  hahoe: {
+    name: '하회탈',
+    icon: '🎭',
+    rarity: 1,
+    price: 5,
+    desc: () => '그림카드(J·Q·K)가 점수에 들어갈 때마다 +3배',
+    card: (c) => (isFace(c) ? { mult: 3 } : undefined),
+  },
+  fan: {
+    name: '오방색 부채',
+    icon: '🪭',
+    rarity: 2,
+    price: 7,
+    desc: () => '점수에 들어간 카드에 ♠♥♦♣ 네 무늬가 모두 있으면 ×3배',
+    hand: (ctx) => {
+      // 도깨비 카드는 빈 무늬를 채워 준다
+      const sc = ctx.hand.scoring.filter((c) => !isStone(c));
+      const fixed = new Set(sc.filter((c) => c.enh !== 'wild').map((c) => c.suit));
+      const wild = sc.filter((c) => c.enh === 'wild').length;
+      return SUITS.filter((x) => !fixed.has(x)).length <= wild ? { xmult: 3 } : undefined;
+    },
+  },
+  gambler: {
+    name: '노름꾼',
+    icon: '🎲',
+    rarity: 2,
+    price: 6,
+    desc: () => '행운 카드가 터질 확률이 두 배',
+  },
+  sunMoon: {
+    name: '해와 달',
+    icon: '🌗',
+    rarity: 2,
+    price: 6,
+    desc: () => '낸 카드가 모두 붉은 무늬(♥♦)거나 모두 검은 무늬(♠♣)면 ×2배',
+    hand: (ctx) => {
+      const p = ctx.played.filter((c) => !isStone(c));
+      if (!p.length) return undefined;
+      return p.every(isRed) || p.every(isBlack) ? { xmult: 2 } : undefined;
+    },
+  },
+  sangaji: {
+    name: '산가지',
+    icon: '🥢',
+    rarity: 1,
+    price: 4,
+    desc: () => '낸 패에 그림카드가 하나도 없으면 +15배',
+    hand: (ctx) => (ctx.played.some(isFace) ? undefined : { mult: 15 }),
+  },
+  loner: {
+    name: '외톨이 도깨비',
+    icon: '🧌',
+    rarity: 2,
+    price: 6,
+    desc: () => '카드를 1장만 내면 ×2.5배',
+    hand: (ctx) => (ctx.played.length === 1 ? { xmult: 2.5 } : undefined),
+  },
+  doljanchi: {
+    name: '돌잔치',
+    icon: '🎂',
+    rarity: 2,
+    price: 6,
+    desc: () => '덱이 52장보다 많으면 늘어난 1장마다 +2배',
+    hand: (ctx) => (ctx.env.deckSize > 52 ? { mult: (ctx.env.deckSize - 52) * 2 } : undefined),
+  },
+  broom: {
+    name: '대빗자루',
+    icon: '🧹',
+    rarity: 2,
+    price: 6,
+    desc: () => '덱이 52장보다 적으면 줄어든 1장마다 +2배',
+    hand: (ctx) => (ctx.env.deckSize < 52 ? { mult: (52 - ctx.env.deckSize) * 2 } : undefined),
+  },
+  peddler: {
+    name: '방물장수',
+    icon: '🧺',
+    rarity: 1,
+    price: 5,
+    desc: () => '상점에서 첫 번째 물건 바꾸기가 공짜',
+  },
+  crystal: {
+    name: '수정 구슬',
+    icon: '🔮',
+    rarity: 2,
+    price: 6,
+    desc: () => '소모품을 1개 더 지닐 수 있어요',
+  },
+  backpack: {
+    name: '보부상 지게',
+    icon: '🎒',
+    rarity: 2,
+    price: 7,
+    desc: () => '손패가 1장 늘어요 (다음 판부터)',
+  },
+  fortuneBox: {
+    name: '복채 상자',
+    icon: '🎁',
+    rarity: 1,
+    price: 5,
+    desc: () => '이자 한도가 5냥에서 10냥으로 늘어요',
+  },
+  lostMallet: {
+    name: '주인 잃은 방망이',
+    icon: '🏏',
+    rarity: 2,
+    price: 6,
+    desc: () => '판을 깰 때마다 도깨비 방망이 하나를 받아요 (자리가 있으면)',
   },
   mirror: {
     name: '업경',

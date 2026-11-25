@@ -1838,3 +1838,334 @@ button {
   padding: 12px 10px;
   font-size: 17px;
 }
+
+/* ───────── 특수 카드 */
+.enh-jade .enh-badge {
+  background: #1f9e6e;
+}
+.face.enh-jade {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.75), transparent 45%),
+    linear-gradient(160deg, rgba(190, 245, 215, 0.97), rgba(110, 205, 160, 0.95));
+  border-color: #3aa67a;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45), inset 0 0 18px rgba(255, 255, 255, 0.55);
+}
+.face.stone {
+  background:
+    radial-gradient(circle at 25% 25%, rgba(255, 255, 255, 0.25), transparent 40%),
+    radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.25), transparent 45%),
+    repeating-radial-gradient(circle at 40% 60%, #8a8790 0 3px, #7b7882 3px 7px);
+  border: 1px solid #5b5862;
+  color: #f1eee8;
+}
+.stone-mark {
+  flex-direction: column;
+  gap: 4px;
+}
+.stone-mark b {
+  font-size: calc(var(--cw) * 0.45);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+.stone-mark small {
+  font-size: calc(var(--cw) * 0.14);
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+}
+.enh-wild .enh-badge {
+  background: conic-gradient(#e0473a, #f4c24f, #2fae8f, #3f8efc, #a35bd6, #e0473a);
+}
+.face.enh-wild {
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45), inset 0 0 0 3px rgba(163, 91, 214, 0.55);
+}
+.face.enh-wild .center {
+  background: linear-gradient(135deg, #e0473a, #f4c24f, #2fae8f, #3f8efc, #a35bd6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.enh-lucky .enh-badge {
+  background: #3c9b3c;
+}
+.face.enh-lucky {
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45), inset 0 0 0 3px rgba(80, 190, 80, 0.6);
+}
+.enh-steel .enh-badge {
+  background: linear-gradient(#cfd6de, #7d8894);
+  color: #1d2430;
+}
+.face.enh-steel {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.85), transparent 45%),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.18) 0 2px, transparent 2px 6px),
+    linear-gradient(160deg, #e7ebf0, #a9b3be);
+  border-color: #7d8894;
+}
+/* 도장 */
+.seal {
+  position: absolute;
+  left: -6px;
+  bottom: -6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  rotate: -8deg;
+}
+.seal-red {
+  background: #c9302a;
+}
+.seal-gold {
+  background: #c98f1d;
+}
+.seal-blue {
+  background: #2c66c9;
+}
+.seal-purple {
+  background: #7b3fc0;
+}
+.mini .seal {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  left: -3px;
+  bottom: -3px;
+}
+.f-retrig {
+  background: #c9302a;
+  font-size: 20px;
+}
+.card.lucky-hit .face {
+  animation: lucky 0.5s ease-out;
+}
+@keyframes lucky {
+  40% { transform: translateY(-14px) scale(1.15); box-shadow: 0 0 30px 10px rgba(120, 230, 120, 0.8); }
+}
+.card.shatter .face {
+  animation: shatter 0.5s ease-in forwards;
+}
+@keyframes shatter {
+  20% { transform: scale(1.1) rotate(-4deg); filter: brightness(1.8); }
+  100% { transform: scale(0.4) rotate(25deg); opacity: 0; filter: blur(3px); }
+}
+
+/* ───────── 상점: 부적·소모품·보따리 세 줄 (가로 화면은 세 칸) */
+.shop-list {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.shop-list .shelf {
+  flex-direction: column;
+  gap: 8px;
+}
+.shop-list .shelf-label {
+  writing-mode: horizontal-tb;
+  padding: 3px 8px;
+  align-self: flex-start;
+}
+.shop-list .item {
+  max-width: none;
+  flex: none;
+}
+.item.pack-item {
+  background: linear-gradient(160deg, rgba(120, 60, 30, 0.5), rgba(60, 30, 20, 0.5));
+  border-color: rgba(244, 194, 79, 0.45);
+}
+.portrait .shop-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 보따리 화면 */
+.pack-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.pack-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.pack-head b {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 28px;
+  color: var(--gold);
+}
+.pack-head span {
+  color: var(--muted);
+}
+.pack-targets {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+}
+.pt-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  --cw: 64px;
+  --ch: 90px;
+}
+.pcard {
+  position: relative;
+  width: var(--cw);
+  height: var(--ch);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.pcard:hover {
+  transform: translateY(-4px);
+}
+.pcard.on {
+  transform: translateY(-10px);
+}
+.pcard.on .face {
+  box-shadow: 0 0 0 3px var(--gold), 0 0 18px rgba(244, 194, 79, 0.7);
+}
+.pcard.big {
+  --cw: 96px;
+  --ch: 134px;
+  cursor: default;
+}
+.pack-opts {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.opt {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  text-align: center;
+  animation: dealIn 0.45s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+.opt.taken {
+  opacity: 0.35;
+}
+@keyframes dealIn {
+  0% { transform: translateY(30px) rotateY(90deg) scale(0.7); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+.opt p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e7dcf5;
+}
+.opt small {
+  color: var(--gold);
+  font-size: 12px;
+}
+.opt-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.opt-thing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.opt-thing .ico {
+  font-size: 44px;
+}
+.opt-thing b {
+  font-size: 17px;
+}
+.pack-foot {
+  display: flex;
+  justify-content: center;
+  margin-top: auto;
+}
+.rrow.gain b {
+  color: #c9b3ff;
+}
+.portrait .opt {
+  width: 150px;
+  padding: 8px;
+}
+.portrait .pcard.big {
+  --cw: 76px;
+  --ch: 106px;
+}
+.portrait .pt-row {
+  --cw: 52px;
+  --ch: 74px;
+  gap: 6px;
+}
+.portrait .pack-head b {
+  font-size: 22px;
+}
+.select-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #d9ccff;
+}
+.portrait .select-hint {
+  white-space: normal;
+  font-size: 13px;
+  line-height: 1.3;
+  top: 760px;
+}
+.opt {
+  width: 168px;
+  padding: 10px;
+}
+.pack-opts {
+  gap: 10px;
+}
+.pack-view .pcard.big {
+  --cw: 84px;
+  --ch: 118px;
+}
+.pack-view,
+.shop-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.pack-view::-webkit-scrollbar,
+.shop-list::-webkit-scrollbar {
+  width: 6px;
+}
+.pack-view::-webkit-scrollbar-thumb,
+.shop-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+[data-phase='shop'] .shop:has(.pack-view) .merchant-face {
+  font-size: 40px;
+}
+.portrait .opt {
+  width: calc(50% - 6px);
+}
+.mini .center.stone-mark {
+  display: flex;
+}
+.mini .stone-mark small {
+  display: none;
+}

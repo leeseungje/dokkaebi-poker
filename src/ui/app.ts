@@ -1,11 +1,11 @@
 // 화면 전체를 그리고 입력을 받아 Run 에 전달한다. 점수 계산 단계(steps)를 따라 연출을 재생한다.
 import { bossDef } from '../core/bosses';
-import { type Card, ENH_INFO, rankLabel, SUIT_NAME, SUIT_SYMBOL } from '../core/cards';
+import { type Card, cardDesc, ENH_INFO, rankLabel, SEAL_INFO, SUIT_NAME, SUIT_SYMBOL } from '../core/cards';
 import { charmDef, type CharmInst, sellPrice } from '../core/charms';
-import { consDef, type ConsKey } from '../core/consumables';
+import { consDef, type ConsKey, PACKS, type PackKey } from '../core/consumables';
 import { evaluate, HAND_ORDER, HANDS, handValue } from '../core/hands';
 import { randomSeed } from '../core/rng';
-import { ANTES, MAX_CHARMS, MAX_CONS, MAX_SELECT, Run, type RunState, STAGE_NAME, type ShopItem } from '../core/run';
+import { ANTES, MAX_CHARMS, MAX_SELECT, Run, type RunState, STAGE_NAME, type ShopItem } from '../core/run';
 import type { Step } from '../core/scoring';
 import { audio } from './audio';
 import { $, countTo, fmt, fmtMult, h, replay, sleep } from './dom';
@@ -146,19 +146,28 @@ function fit() {
 // ───────── 카드
 
 function cardFace(c: Card): HTMLElement {
+  const seal = c.seal ? h('div', { class: `seal seal-${c.seal}`, title: SEAL_INFO[c.seal].desc }, '印') : null;
+  if (c.enh === 'stone')
+    return h(
+      'div',
+      { class: 'face stone enh-stone' },
+      h('div', { class: 'center stone-mark' }, h('b', null, '石'), h('small', null, '+50끗')),
+      seal,
+    );
   const red = c.suit === 'H' || c.suit === 'D';
   const r = rankLabel(c.rank);
-  const sym = SUIT_SYMBOL[c.suit];
+  const sym = c.enh === 'wild' ? '✦' : SUIT_SYMBOL[c.suit];
   const face = c.rank >= 11 && c.rank <= 13 ? { 11: ['💂', '포졸'], 12: ['👸', '각시'], 13: ['🤴', '사또'] }[c.rank as 11 | 12 | 13] : null;
   return h(
     'div',
     { class: `face ${red ? 'red' : 'black'}${c.enh ? ` enh-${c.enh}` : ''}` },
-    h('div', { class: 'corner tl' }, h('b', null, r), h('i', null, sym)),
+    h('div', { class: 'corner tl' }, h('b', null, r), h('i', null, SUIT_SYMBOL[c.suit])),
     face
       ? h('div', { class: 'center figure' }, h('span', { class: 'fig' }, face[0]), h('small', null, face[1]))
       : h('div', { class: `center${c.rank === 14 ? ' ace' : ''}` }, sym),
-    h('div', { class: 'corner br' }, h('b', null, r), h('i', null, sym)),
-    c.enh ? h('div', { class: 'enh-badge', title: ENH_INFO[c.enh].desc }, { bonus: '복', mult: '불', gold: '金' }[c.enh]) : null,
+    h('div', { class: 'corner br' }, h('b', null, r), h('i', null, SUIT_SYMBOL[c.suit])),
+    c.enh ? h('div', { class: 'enh-badge', title: ENH_INFO[c.enh].desc }, ENH_INFO[c.enh].short) : null,
+    seal,
   );
 }
 
@@ -292,7 +301,9 @@ function updateSelectionUI() {
     // 점수에 들어갈 카드 표시
     const scoring = new Set(r.scoring.map((c) => c.id));
     for (const id of selected) cardEls.get(id)?.classList.toggle('scoring', scoring.has(id));
-    ui.hint.textContent = '';
+    // 마지막으로 고른 특수 카드의 설명
+    const lastSpecial = [...selected].reverse().find((id) => cardDesc(run!.card(id)).length);
+    ui.hint.textContent = lastSpecial ? cardDesc(run.card(lastSpecial)).join(' · ') : '';
   } else {
     ui.handName.textContent = ' ';
     ui.chips.textContent = '0';
@@ -369,7 +380,7 @@ function renderCharms() {
     ...Array.from({ length: MAX_CHARMS - s.charms.length }, () => h('div', { class: 'charm empty' })),
   );
   consRow.replaceChildren(
-    h('div', { class: 'row-label' }, `소모품 ${s.consumables.length}/${MAX_CONS}`),
+    h('div', { class: 'row-label' }, `소모품 ${s.consumables.length}/${run.maxCons}`),
     ...s.consumables.map((k, i) => {
       const d = consDef(k);
       const el = h(
@@ -387,7 +398,7 @@ function renderCharms() {
       el.addEventListener('pointerenter', () => audio.hover());
       return el;
     }),
-    ...Array.from({ length: MAX_CONS - s.consumables.length }, () => h('div', { class: 'cons empty' })),
+    ...Array.from({ length: Math.max(0, run.maxCons - s.consumables.length) }, () => h('div', { class: 'cons empty' })),
   );
 }
 
@@ -685,9 +696,28 @@ async function playStep(st: Step, chipN: () => number, multN: () => number) {
     await sleep(800 * d);
     return;
   }
+  if (st.kind === 'retrig') {
+    if (cardEl) floatOn(cardEl, '한 번 더!', 'f-retrig');
+    audio.retrig();
+    await sleep(320 * d);
+    return;
+  }
+  if (st.kind === 'break') {
+    if (cardEl) {
+      cardEl.classList.add('shatter');
+      floatOn(cardEl, '쨍그랑!', 'f-debuff');
+    }
+    audio.shatter();
+    await sleep(520 * d);
+    return;
+  }
+  if (st.kind === 'lucky') {
+    if (cardEl) replay(cardEl, 'lucky-hit');
+    audio.lucky();
+  }
   if (cardEl) replay(cardEl, st.kind === 'held' ? 'held-hit' : 'hit');
   if (charmEl) replay(charmEl, 'trigger');
-  const at = charmEl && st.kind !== 'card' && st.kind !== 'enh' ? charmEl : cardEl;
+  const at = charmEl && st.kind !== 'card' && st.kind !== 'enh' && st.kind !== 'lucky' ? charmEl : cardEl;
   const below = at === charmEl;
   if (st.chips) {
     if (at) floatOn(at, `+${fmt(st.chips)}`, 'f-chips', below);
@@ -725,6 +755,11 @@ async function doDiscard() {
   }
   busy = true;
   closeMenus();
+  if (r.gains.length) {
+    audio.magic();
+    toast(`보라 도장! ${r.gains.map((k) => consDef(k).name).join(', ')}을(를) 받았어요`);
+    renderCharms();
+  }
   ids.forEach((id, i) => {
     const el = cardEls.get(id);
     if (!el) return;
@@ -775,7 +810,7 @@ async function roundWon() {
     [`남은 내기 ${rw.plays}번`, rw.plays],
     ...(rw.gold ? ([['금 각인 카드', rw.gold]] as [string, number][]) : []),
     ...(rw.charms ? ([['부적', rw.charms]] as [string, number][]) : []),
-    [`이자 (가진 5냥마다 1냥, 최대 5냥)`, rw.interest],
+    [`이자 (가진 5냥마다 1냥, 최대 ${run.hasCharm('fortuneBox') ? 10 : 5}냥)`, rw.interest],
   ];
   const totalEl = h('b', null, '0');
   const list = h('div', { class: 'reward-rows' });
@@ -798,6 +833,12 @@ async function roundWon() {
     const from = acc;
     acc += v;
     void countTo(totalEl, from, acc, 200 / prefs.speed);
+  }
+  if (rw.gains.length) {
+    await wait(220);
+    list.append(h('div', { class: 'rrow gain' }, h('span', null, '덤으로 받은 소모품'), h('b', null, rw.gains.map((k) => `${consDef(k).icon} ${consDef(k).name}`).join(', '))));
+    audio.magic();
+    renderCharms();
   }
   await new Promise<void>((resolve) => go.addEventListener('click', () => resolve(), { once: true }));
   audio.buy();
@@ -880,15 +921,20 @@ const pickLine = (k: keyof typeof MERCHANT) => MERCHANT[k][Math.floor(Math.rando
 function itemView(it: ShopItem, i: number): HTMLElement {
   if (!run) return h('div');
   const isCharm = it.kind === 'charm';
-  const d = isCharm ? charmDef(it.key as never) : consDef(it.key as ConsKey);
+  const isPack = it.kind === 'pack';
+  const d = isCharm ? charmDef(it.key as never) : isPack ? PACKS[it.key as PackKey] : consDef(it.key as ConsKey);
   const rarity = isCharm ? charmDef(it.key as never).rarity : 0;
-  const desc = isCharm ? charmDef(it.key as never).desc({ key: it.key as never, uid: 0, n: charmDef(it.key as never).start ?? 0 }) : consDef(it.key as ConsKey).desc;
-  const kind = isCharm ? '부적' : consDef(it.key as ConsKey).kind === 'book' ? '족보 비급' : '도깨비 방망이';
-  const buy = h('button', { class: 'btn primary sm', disabled: it.sold || run.s.money < it.price, onclick: () => shopBuy(i) }, it.sold ? '팔림' : `사기`);
+  const desc = isCharm
+    ? charmDef(it.key as never).desc({ key: it.key as never, uid: 0, n: charmDef(it.key as never).start ?? 0 })
+    : isPack
+      ? PACKS[it.key as PackKey].desc
+      : consDef(it.key as ConsKey).desc;
+  const kind = isCharm ? '부적' : isPack ? '보따리' : { book: '족보 비급', mallet: '도깨비 방망이', seal: '도장' }[consDef(it.key as ConsKey).kind];
+  const buy = h('button', { class: 'btn primary sm', disabled: it.sold || run.s.money < it.price, onclick: () => shopBuy(i) }, it.sold ? '팔림' : isPack ? '열기' : '사기');
   const hag = h('button', { class: 'btn ghost sm', disabled: it.sold || it.haggled, onclick: () => shopHaggle(i) }, it.haggled ? '흥정 끝' : '흥정');
   return h(
     'div',
-    { class: `item ${isCharm ? `charm-item r${rarity}` : 'cons-item'}${it.sold ? ' sold' : ''}` },
+    { class: `item ${isCharm ? `charm-item r${rarity}` : isPack ? 'pack-item' : 'cons-item'}${it.sold ? ' sold' : ''}` },
     h('div', { class: 'kind' }, kind, rarity ? h('span', { class: `rar r${rarity}` }, ['', '흔함', '귀함', '희귀'][rarity]) : null),
     h('div', { class: 'ico' }, d.icon),
     h('div', { class: 'nm' }, d.name),
@@ -904,6 +950,7 @@ function renderShop() {
   if (!merchantLine) merchantLine = pickLine('hello');
   const charms = s.shop.map((it, i) => [it, i] as const).filter(([it]) => it.kind === 'charm');
   const cons = s.shop.map((it, i) => [it, i] as const).filter(([it]) => it.kind === 'cons');
+  const packs = s.shop.map((it, i) => [it, i] as const).filter(([it]) => it.kind === 'pack');
   const nextStage = (s.stage + 1) % 3;
   const nextAnte = s.stage === 2 ? s.ante + 1 : s.ante;
   const nextBoss = nextStage === 2 ? bossDef(s.boss) : null;
@@ -917,6 +964,13 @@ function renderShop() {
           nextBoss ? h('span', { class: 'boss-warn' }, ` ${nextBoss.icon} ${nextBoss.name}: ${nextBoss.desc}`) : null,
         );
   const thisBoss = bossDef(s.boss);
+  if (s.pack) {
+    shopEl.replaceChildren(
+      h('div', { class: 'merchant' }, h('div', { class: 'merchant-face' }, '👺'), h('div', { class: 'bubble' }, merchantLine)),
+      renderPack(),
+    );
+    return;
+  }
   shopEl.replaceChildren(
     h(
       'div',
@@ -930,11 +984,12 @@ function renderShop() {
       { class: 'shop-list' },
       h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '부적'), ...charms.map(([it, i]) => itemView(it, i)), charms.length ? null : h('p', { class: 'dim' }, '부적이 다 팔렸어요')),
       h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '소모품'), ...cons.map(([it, i]) => itemView(it, i))),
+      h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '보따리'), ...packs.map(([it, i]) => itemView(it, i))),
     ),
     h(
       'div',
       { class: 'shop-foot' },
-      h('button', { class: 'btn ghost', disabled: s.money < s.rerollCost, onclick: shopReroll }, `🔄 물건 바꾸기 (${s.rerollCost}냥)`),
+      h('button', { class: 'btn ghost', disabled: s.money < run.rerollPrice, onclick: shopReroll }, `🔄 물건 바꾸기 (${run.rerollPrice ? `${run.rerollPrice}냥` : '공짜'})`),
       preview,
       h('button', { class: 'btn primary big', onclick: leaveShop }, '다음 판 →'),
     ),
@@ -951,7 +1006,103 @@ function shopBuy(i: number) {
     return;
   }
   audio.buy();
-  merchantLine = pickLine('buy');
+  if (r.pack) {
+    packSel = [];
+    audio.packOpen();
+    merchantLine = '자, 풀어 보게! 뭐가 들었을꼬?';
+  } else merchantLine = pickLine('buy');
+  renderAll();
+  save();
+}
+
+// ───────── 보따리
+
+let packSel: number[] = [];
+
+function packOption(o: { kind: string; card?: Card; key?: string }): HTMLElement {
+  if (o.kind === 'card' && o.card) {
+    const notes = cardDesc(o.card);
+    return h('div', { class: 'opt-card' }, h('div', { class: 'pcard big' }, cardFace(o.card)), h('p', null, notes.length ? notes.join(' · ') : '평범한 카드'));
+  }
+  if (o.kind === 'charm') {
+    const cd = charmDef(o.key as never);
+    return h(
+      'div',
+      { class: 'opt-thing' },
+      h('div', { class: 'ico' }, cd.icon),
+      h('b', null, cd.name),
+      h('span', { class: 'rar r' + cd.rarity }, ['', '흔함', '귀함', '희귀'][cd.rarity]),
+      h('p', null, cd.desc({ key: o.key as never, uid: 0, n: cd.start ?? 0 })),
+    );
+  }
+  const cd = consDef(o.key as ConsKey);
+  const [lo, hi] = cd.select;
+  const how = lo > 0 ? '위 카드에서 ' + (lo === hi ? lo : lo + '~' + hi) + '장 골라 쓰기' : '바로 써요';
+  return h('div', { class: 'opt-thing' }, h('div', { class: 'ico' }, cd.icon), h('b', null, cd.name), h('p', null, cd.desc), h('small', null, how));
+}
+
+function renderPack(): HTMLElement {
+  const s = run!.s;
+  const p = s.pack!;
+  const d = PACKS[p.key];
+  const opts = p.options.map((o, i) =>
+    h(
+      'div',
+      { class: 'opt' + (o.taken ? ' taken' : ''), style: 'animation-delay:' + i * 90 + 'ms' },
+      packOption(o),
+      h('button', { class: 'btn primary sm', disabled: o.taken, onclick: () => pickPack(i) }, o.taken ? '골랐어요' : '고르기'),
+    ),
+  );
+  let targets: HTMLElement | null = null;
+  if (p.targets.length) {
+    const cards = p.targets.map((id) => {
+      const c = run!.card(id);
+      const el = h('div', { class: 'pcard' + (packSel.includes(id) ? ' on' : ''), title: cardDesc(c).join(' / ') }, cardFace(c));
+      el.addEventListener('click', () => {
+        const k = packSel.indexOf(id);
+        if (k >= 0) packSel.splice(k, 1);
+        else if (packSel.length < 3) packSel.push(id);
+        else return audio.error();
+        audio.select(k < 0);
+        renderShop();
+      });
+      return el;
+    });
+    targets = h('div', { class: 'pack-targets' }, h('div', { class: 'dim' }, '덱에서 꺼낸 카드 · 고른 ' + packSel.length + '장'), h('div', { class: 'pt-row' }, ...cards));
+  }
+  return h(
+    'div',
+    { class: 'pack-view' },
+    h('div', { class: 'pack-head' }, h('b', null, d.icon + ' ' + d.name), h('span', null, p.picksLeft + '개 더 고를 수 있어요')),
+    targets,
+    h('div', { class: 'pack-opts' }, ...opts),
+    h('div', { class: 'pack-foot' }, h('button', { class: 'btn ghost', onclick: skipPack }, '그만 고르기')),
+  );
+}
+
+function pickPack(i: number) {
+  if (!run) return;
+  const r = run.pickPack(i, [...packSel]);
+  if ('error' in r) {
+    audio.error();
+    toast(r.error);
+    return;
+  }
+  packSel = [];
+  if (r.added) audio.cardAdd();
+  else audio.magic();
+  toast(r.note);
+  merchantLine = run.s.pack ? '하나 더 골라 보게!' : pickLine('buy');
+  renderAll();
+  save();
+}
+
+function skipPack() {
+  if (!run) return;
+  audio.button();
+  run.skipPack();
+  packSel = [];
+  merchantLine = '다음에 또 오게나.';
   renderAll();
   save();
 }
@@ -1150,6 +1301,8 @@ function showHowTo() {
         h('li', null, h('b', null, '점수 = 끗 × 배'), '. 족보 기본값에 점수에 들어간 카드 숫자가 끗으로 더해져요.'),
         h('li', null, '판을 깨면 냥을 받아 ', h('b', null, '도깨비 장터'), '에서 부적과 소모품을 사요. 물건마다 한 번 ', h('b', null, '흥정'), '할 수 있는데, 깎아 줄 수도 값을 올릴 수도 있어요.'),
         h('li', null, h('b', null, '부적'), '(최대 5장)은 왼쪽부터 차례로 효과를 내요. +배 다음에 ×배가 오도록 순서를 맞추면 점수가 크게 뛰어요.'),
+        h('li', null, h('b', null, '보따리'), '를 열면 카드를 덱에 넣거나(카드 보따리), 방망이·도장을 덱 카드에 바로 쓸 수 있어요.'),
+        h('li', null, h('b', null, '특수 카드'), ': 옥(×2배, 가끔 깨짐)·돌(+50끗)·도깨비(모든 무늬)·행운·쇠(손에 있으면 ×1.5) 등. ', h('b', null, '도장'), '은 다시 계산·냥·비급·방망이를 줘요.'),
         h('li', null, h('b', null, '요괴'), '는 규칙을 비틀어요. 상점에서 다음 요괴를 미리 확인하세요.'),
       ),
       h('p', { class: 'dim' }, '단축키: Enter 내기 · Delete 버리기 · S 정렬 바꾸기'),
@@ -1261,6 +1414,7 @@ export function start() {
         renderAll,
         syncHand,
         audio,
+        refresh: () => run?.s.deck.forEach(refreshCardEl),
       },
     });
 }

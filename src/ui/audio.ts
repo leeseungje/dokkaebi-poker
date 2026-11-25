@@ -355,6 +355,37 @@ class Audio {
   levelUp() {
     [0, 2, 4, 5].forEach((s, i) => this.pluck(noteHz(s, 1), { when: i * 0.06, vol: 0.16 }));
   }
+  /** 붉은 도장: 같은 음을 한 번 더 튕긴다 */
+  retrig() {
+    this.pluck(noteHz(7, 0), { vol: 0.16, decay: 0.4 });
+    this.pluck(noteHz(9, 0), { when: 0.07, vol: 0.18, decay: 0.6 });
+  }
+  /** 옥이 깨지는 소리: 높은 금속성 파편 여러 개 + 짧은 잡음 */
+  shatter() {
+    this.noise({ vol: 0.3, dur: 0.18, freq: 5200, freqEnd: 2200, q: 0.7 });
+    for (let i = 0; i < 7; i++) {
+      const hz = 2400 + Math.random() * 3600;
+      this.tone(hz, { when: 0.02 + i * 0.035 + Math.random() * 0.02, vol: 0.07, dur: 0.18 + Math.random() * 0.2, type: 'sine' });
+    }
+    this.drum({ when: 0.01, vol: 0.18, pitch: 160 });
+  }
+  /** 행운 카드: 반짝이는 상승 아르페지오 */
+  lucky() {
+    [0, 2, 4, 7].forEach((s, i) => this.tone(noteHz(s, 2), { when: i * 0.04, vol: 0.06, dur: 0.35, type: 'triangle' }));
+    this.coin(0.18, 0.1);
+  }
+  /** 보따리 풀기: 천 스치는 소리 + 기대감 있는 두 음 */
+  packOpen() {
+    for (let i = 0; i < 4; i++) this.noise({ when: i * 0.05, vol: 0.1, dur: 0.12, freq: 1800 + i * 300, freqEnd: 900, q: 0.6 });
+    this.pluck(noteHz(5, 0), { when: 0.2, vol: 0.16 });
+    this.pluck(noteHz(9, 0), { when: 0.32, vol: 0.18, decay: 1.2 });
+    this.tone(noteHz(9, 1), { when: 0.32, vol: 0.04, dur: 0.8, type: 'sine' });
+  }
+  /** 카드가 덱에 들어갈 때 */
+  cardAdd() {
+    this.noise({ vol: 0.16, dur: 0.12, freq: 1200, freqEnd: 4200, q: 0.9 });
+    [0, 4, 7].forEach((s, i) => this.pluck(noteHz(s, 0), { when: 0.08 + i * 0.06, vol: 0.15 }));
+  }
   shuffle() {
     for (let i = 0; i < 7; i++) this.noise({ when: i * 0.03, vol: 0.14, dur: 0.05, freq: 2500 + i * 200, q: 1.2 });
   }

@@ -1,5 +1,5 @@
 // 요괴: 각 구역의 마지막 판에서 규칙을 비트는 우두머리
-import { type Card, isFace } from './cards';
+import { type Card, hasSuit, isFace } from './cards';
 
 export interface BossDef {
   name: string;
@@ -23,8 +23,8 @@ export interface BossDef {
 }
 
 export const BOSSES = {
-  mulgwisin: { name: '물귀신', icon: '🌊', desc: '♣ 카드는 점수에 들어가지 않아요', debuff: (c) => c.suit === 'C' },
-  mongdal: { name: '몽달귀신', icon: '👻', desc: '♥ 카드는 점수에 들어가지 않아요', debuff: (c) => c.suit === 'H' },
+  mulgwisin: { name: '물귀신', icon: '🌊', desc: '♣ 카드는 점수에 들어가지 않아요', debuff: (c) => hasSuit(c, 'C') },
+  mongdal: { name: '몽달귀신', icon: '👻', desc: '♥ 카드는 점수에 들어가지 않아요', debuff: (c) => hasSuit(c, 'H') },
   dalgyal: { name: '달걀귀신', icon: '🥚', desc: '그림카드(J·Q·K)는 점수에 들어가지 않아요', debuff: (c) => isFace(c) },
   geuseundae: { name: '그슨대', icon: '🌫️', desc: '손에 드는 카드가 1장 줄어요 (7장)', handSize: 7 },
   dueoksini: { name: '두억시니', icon: '👹', desc: '버리기를 할 수 없어요', discards: 0 },

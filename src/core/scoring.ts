@@ -1,11 +1,11 @@
 // 한 번 낸 패의 점수 계산. 화면 연출을 위해 한 단계씩 기록(steps)을 남긴다.
-import { type Card, rankChips } from './cards';
+import { type Card, cardChips } from './cards';
 import { type CharmInst, type Ctx, type Effect, type ScoreEnv, effectiveCharm } from './charms';
 import { evaluate, type HandResult, type HandType, handValue } from './hands';
 import type { Rng } from './rng';
 
 export interface Step {
-  kind: 'card' | 'enh' | 'held' | 'charm' | 'debuff' | 'zero';
+  kind: 'card' | 'enh' | 'held' | 'charm' | 'debuff' | 'zero' | 'retrig' | 'lucky' | 'break';
   cardId?: number;
   charmUid?: number;
   chips?: number;
@@ -27,6 +27,8 @@ export interface ScoreResult {
   money: number;
   /** 다 써서 사라지는 부적 uid */
   destroyed: number[];
+  /** 깨져서 덱에서 사라지는 카드 id (옥 카드) */
+  broken: number[];
 }
 
 export interface ScoreInput {
@@ -71,11 +73,19 @@ export function scorePlay(input: ScoreInput): ScoreResult {
       steps.push({ kind: 'debuff', cardId: c.id, now: { chips, mult } });
       return;
     }
-    let reps = 1;
+    let reps = c.seal === 'red' ? 2 : 1;
     for (const a of active) if (a?.[0].retrig) reps += a[0].retrig(c, i, ctx, a[1]);
     for (let r = 0; r < reps; r++) {
-      push('card', { chips: rankChips(c.rank) + (c.enh === 'bonus' ? 30 : 0) }, { cardId: c.id });
+      if (r > 0) steps.push({ kind: 'retrig', cardId: c.id, now: { chips, mult } });
+      push('card', { chips: cardChips(c) }, { cardId: c.id });
       if (c.enh === 'mult') push('enh', { mult: 4 }, { cardId: c.id });
+      if (c.enh === 'jade') push('enh', { xmult: 2 }, { cardId: c.id });
+      if (c.enh === 'lucky') {
+        const luck = env.luck ?? 1;
+        if (rng.chance(0.2 * luck)) push('lucky', { mult: 20 }, { cardId: c.id });
+        if (rng.chance((1 / 15) * luck)) push('lucky', { money: 20 }, { cardId: c.id });
+      }
+      if (c.seal === 'gold') push('enh', { money: 3 }, { cardId: c.id });
       active.forEach((a, k) => {
         const e = a?.[0].card?.(c, ctx, a[1]);
         if (e) push('charm', e, { cardId: c.id, charmUid: charms[k].uid });
@@ -85,6 +95,7 @@ export function scorePlay(input: ScoreInput): ScoreResult {
 
   for (const c of held) {
     if (debuff?.(c)) continue;
+    if (c.enh === 'steel') push('held', { xmult: 1.5 }, { cardId: c.id });
     active.forEach((a, k) => {
       const e = a?.[0].held?.(c, ctx, a[1]);
       if (e) push('held', e, { cardId: c.id, charmUid: charms[k].uid });
@@ -102,10 +113,18 @@ export function scorePlay(input: ScoreInput): ScoreResult {
     steps.push({ kind: 'zero', now: { chips, mult } });
   }
 
+  // 옥 카드는 쓸 때마다 1/4 확률로 깨진다
+  const broken: number[] = [];
+  for (const c of hand.scoring)
+    if (c.enh === 'jade' && !debuff?.(c) && rng.chance(0.25)) {
+      broken.push(c.id);
+      steps.push({ kind: 'break', cardId: c.id, now: { chips, mult } });
+    }
+
   const destroyed: number[] = [];
   active.forEach((a, k) => {
     if (a && !a[2] && a[0].after?.(ctx, a[1])) destroyed.push(charms[k].uid);
   });
 
-  return { hand, level, base, steps, chips, mult, total, money, destroyed };
+  return { hand, level, base, steps, chips, mult, total, money, destroyed, broken };
 }

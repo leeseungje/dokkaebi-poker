@@ -1,5 +1,5 @@
 // 낸 카드(1~5장)의 족보 판정
-import type { Card } from './cards';
+import { type Card, hasSuit, isStone, SUITS } from './cards';
 
 export type HandType =
   | 'high'
@@ -74,12 +74,14 @@ function straightOf(ranks: number[]): boolean {
 
 export function evaluate(cards: Card[]): HandResult {
   const n = cards.length;
+  // 돌 카드는 숫자·무늬가 없어 족보 판정에서 빼고, 점수에는 언제나 들어간다
+  const core = cards.filter((c) => !isStone(c));
   const byRank = new Map<number, Card[]>();
-  for (const c of cards) byRank.set(c.rank, [...(byRank.get(c.rank) ?? []), c]);
+  for (const c of core) byRank.set(c.rank, [...(byRank.get(c.rank) ?? []), c]);
   const groups = [...byRank.values()].sort((a, b) => b.length - a.length || b[0].rank - a[0].rank);
-  const flush = n === 5 && cards.every((c) => c.suit === cards[0].suit);
-  const straight = straightOf(cards.map((c) => c.rank));
-  const keep = (set: Card[]) => cards.filter((c) => set.includes(c));
+  const flush = n === 5 && core.length === 5 && SUITS.some((s) => core.every((c) => hasSuit(c, s)));
+  const straight = core.length === 5 && straightOf(core.map((c) => c.rank));
+  const keep = (set: Card[]) => cards.filter((c) => set.includes(c) || isStone(c));
 
   const contains = new Set<HandType>(['high']);
   const pairs = groups.filter((g) => g.length >= 2).length;
@@ -105,8 +107,8 @@ export function evaluate(cards: Card[]): HandResult {
   else if (pairs >= 2) [type, scoring] = ['twoPair', keep([...groups[0], ...groups[1]])];
   else if (groups[0]?.length === 2) [type, scoring] = ['pair', keep(groups[0])];
   else {
-    const top = [...cards].sort((a, b) => b.rank - a.rank)[0];
-    [type, scoring] = ['high', top ? [top] : []];
+    const top = [...core].sort((a, b) => b.rank - a.rank)[0];
+    [type, scoring] = ['high', keep(top ? [top] : [])];
   }
   return { type, scoring, contains };
 }

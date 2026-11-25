@@ -16,7 +16,7 @@ const C = (s: string): Card => {
 };
 const cards = (s: string) => s.split(' ').map(C);
 const levels = Object.fromEntries(HAND_ORDER.map((t) => [t, 1])) as Record<HandType, number>;
-const env = { money: 0, discardsLeft: 3, lastPlay: false, discarded: 0, isBoss: false };
+const env = { money: 0, discardsLeft: 3, lastPlay: false, discarded: 0, isBoss: false, deckSize: 52, deckStone: 0, deckEnhanced: 0, luck: 1 };
 
 describe('족보 판정', () => {
   const cases: [string, HandType, number][] = [
@@ -158,7 +158,7 @@ describe('런 진행', () => {
     expect(total).toBe(3 + 3 + 0 + 0 + 0);
     run.collectReward();
     expect(run.s.money).toBe(4 + total);
-    expect(run.s.shop.length).toBe(4);
+    expect(run.s.shop.length).toBe(6);
     run.nextRound();
     expect(run.s.stage).toBe(1);
     expect(run.s.target).toBe(450);
@@ -206,5 +206,126 @@ describe('런 진행', () => {
       const r = playRun(i + 1);
       expect(['won', 'lost']).toContain(r.run.s.phase);
     }
+  });
+});
+
+describe('특수 카드·도장', () => {
+  const sc = (played: Card[], held: Card[] = [], seed = 1) =>
+    scorePlay({ played, held, charms: [], levels, env, rng: new Rng(seed), commit: true });
+  test('돌 카드: 족보에서 빠지고 언제나 +50끗', () => {
+    const [a, b, st] = cards('KS KH 2C');
+    st.enh = 'stone';
+    const r = sc([a, b, st]);
+    expect(r.hand.type).toBe('pair');
+    expect(r.hand.scoring.length).toBe(3);
+    expect(r.total).toBe((12 + 20 + 50) * 2);
+  });
+  test('도깨비 카드는 플러시를 완성', () => {
+    const cs = cards('2H 7H 9H JH KS');
+    cs[4].enh = 'wild';
+    expect(evaluate(cs).type).toBe('flush');
+  });
+  test('돌 카드가 섞이면 플러시·스트레이트가 아님', () => {
+    const cs = cards('2H 7H 9H JH KH');
+    cs[4].enh = 'stone';
+    expect(evaluate(cs).type).toBe('high');
+  });
+  test('옥 카드 ×2, 붉은 도장은 두 번 계산', () => {
+    const [a, b] = cards('KS KH');
+    a.enh = 'jade';
+    expect(sc([a, b]).total).toBe(32 * 4);
+    const [c, d] = cards('KS KH');
+    c.seal = 'red';
+    expect(sc([c, d]).total).toBe(42 * 2);
+  });
+  test('쇠 카드는 손에 있을 때 ×1.5', () => {
+    const [a, b, st] = cards('KS KH 2C');
+    st.enh = 'steel';
+    expect(sc([a, b], [st]).total).toBe(32 * 3);
+  });
+  test('옥 카드는 가끔 깨진다', () => {
+    let broke = 0;
+    for (let i = 0; i < 400; i++) {
+      const [a] = cards('AS');
+      a.enh = 'jade';
+      if (sc([a], [], i + 1).broken.length) broke++;
+    }
+    expect(broke).toBeGreaterThan(60);
+    expect(broke).toBeLessThan(140);
+  });
+});
+
+describe('보따리·새 소모품', () => {
+  const shopRun = (seed: number) => {
+    const run = Run.create(seed);
+    run.s.target = 1;
+    run.play([run.s.hand[0]]);
+    run.collectReward();
+    run.s.money = 100;
+    return run;
+  };
+  test('상점에 보따리 2개, 물건 바꾸기에도 보따리는 그대로', () => {
+    const run = shopRun(21);
+    const packs = run.s.shop.filter((x) => x.kind === 'pack').map((x) => x.key);
+    expect(packs.length).toBe(2);
+    run.reroll();
+    expect(run.s.shop.filter((x) => x.kind === 'pack').map((x) => x.key)).toEqual(packs);
+  });
+  test('카드 보따리: 고른 카드가 덱에 들어감', () => {
+    const run = shopRun(22);
+    run.s.shop.push({ kind: 'pack', key: 'cards', price: 4, haggled: false, sold: false });
+    const r = run.buy(run.s.shop.length - 1);
+    expect('pack' in r && r.pack?.options.length).toBe(3);
+    expect('error' in run.buy(0)).toBe(true);
+    const out = run.pickPack(1);
+    expect('added' in out && out.added).toBeTruthy();
+    expect(run.s.deck.length).toBe(53);
+    expect(run.s.pack).toBe(null);
+  });
+  test('방망이 보따리: 보이는 카드에 바로 사용', () => {
+    const run = shopRun(23);
+    run.s.shop.push({ kind: 'pack', key: 'mallets', price: 4, haggled: false, sold: false });
+    run.buy(run.s.shop.length - 1);
+    const p = run.s.pack!;
+    expect(p.targets.length).toBe(8);
+    p.options[0] = { kind: 'cons', key: 'red' };
+    expect('error' in run.pickPack(0, [99999])).toBe(true);
+    const ids = p.targets.slice(0, 3);
+    expect('ok' in run.pickPack(0, ids)).toBe(true);
+    for (const id of ids) expect(run.card(id).suit).toBe('H');
+  });
+  test('문양 바꾸기는 최대 3장, 둔갑술, 탈 보따리', () => {
+    const run = Run.create(24);
+    run.s.consumables = ['indigo', 'mimic'];
+    expect('error' in run.useCons(0, run.s.hand.slice(0, 4))).toBe(true);
+    run.useCons(0, run.s.hand.slice(0, 3));
+    for (const id of run.s.hand.slice(0, 3)) expect(run.card(id).suit).toBe('C');
+    const [a, b] = run.s.hand;
+    run.useCons(0, [a, b]);
+    expect(run.card(a).rank).toBe(run.card(b).rank);
+    run.s.consumables = ['masks'];
+    const draw = run.s.draw.length;
+    run.useCons(0);
+    expect(run.s.deck.length).toBe(55);
+    expect(run.s.draw.length).toBe(draw + 3);
+  });
+  test('보라 도장을 버리면 방망이, 푸른 도장은 비급', () => {
+    const run = Run.create(25);
+    const id = run.s.hand[0];
+    run.card(id).seal = 'purple';
+    const r = run.discard([id]);
+    expect('gains' in r && r.gains.length).toBe(1);
+    run.s.consumables = [];
+    run.card(run.s.hand[1]).seal = 'blue';
+    run.s.target = 1;
+    run.play([run.s.hand[0]]);
+    expect(run.s.reward!.gains.some((k) => k.startsWith('book:'))).toBe(true);
+  });
+  test('보부상 지게·수정 구슬·방물장수', () => {
+    const run = shopRun(26);
+    run.s.charms = [newCharm('backpack', 90), newCharm('crystal', 91), newCharm('peddler', 92)];
+    expect(run.maxCons).toBe(3);
+    run.nextRound();
+    expect(run.s.hand.length).toBe(9);
   });
 });
