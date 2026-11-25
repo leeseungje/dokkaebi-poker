@@ -1,6 +1,6 @@
 // 화면 전체를 그리고 입력을 받아 Run 에 전달한다. 점수 계산 단계(steps)를 따라 연출을 재생한다.
 import { bossDef } from '../core/bosses';
-import { type Card, cardDesc, ENH_INFO, rankLabel, SEAL_INFO, SUIT_NAME, SUIT_SYMBOL } from '../core/cards';
+import { type Card, cardDesc, ENH_INFO, isWildJoker, rankLabel, SEAL_INFO, SUIT_NAME, SUIT_SYMBOL } from '../core/cards';
 import { charmDef, type CharmInst, sellPrice } from '../core/charms';
 import { consDef, type ConsKey, PACKS, type PackKey } from '../core/consumables';
 import { evaluate, HAND_ORDER, HANDS, handValue } from '../core/hands';
@@ -152,6 +152,16 @@ function cardFace(c: Card): HTMLElement {
       'div',
       { class: 'face stone enh-stone' },
       h('div', { class: 'center stone-mark' }, h('b', null, '石'), h('small', null, '+50끗')),
+      seal,
+    );
+  if (isWildJoker(c))
+    return h(
+      'div',
+      { class: 'face joker' + (c.enh ? ' enh-' + c.enh : '') },
+      h('div', { class: 'corner tl' }, h('b', null, '★'), h('i', null, 'JK')),
+      h('div', { class: 'center figure' }, h('span', { class: 'fig' }, '🃏'), h('small', null, '조커')),
+      h('div', { class: 'corner br' }, h('b', null, '★'), h('i', null, 'JK')),
+      c.enh ? h('div', { class: 'enh-badge', title: ENH_INFO[c.enh].desc }, ENH_INFO[c.enh].short) : null,
       seal,
     );
   const red = c.suit === 'H' || c.suit === 'D';
@@ -990,6 +1000,7 @@ function renderShop() {
       'div',
       { class: 'shop-foot' },
       h('button', { class: 'btn ghost', disabled: s.money < run.rerollPrice, onclick: shopReroll }, `🔄 물건 바꾸기 (${run.rerollPrice ? `${run.rerollPrice}냥` : '공짜'})`),
+      h('button', { class: 'btn ghost', disabled: s.money < s.removeCost, onclick: openRemove }, `✂️ 카드 빼기 (${s.removeCost}냥)`),
       preview,
       h('button', { class: 'btn primary big', onclick: leaveShop }, '다음 판 →'),
     ),
@@ -1013,6 +1024,66 @@ function shopBuy(i: number) {
   } else merchantLine = pickLine('buy');
   renderAll();
   save();
+}
+
+// ───────── 카드 빼기 (상점 서비스)
+
+function openRemove() {
+  if (!run) return;
+  audio.button();
+  let pick: number | null = null;
+  const s = run.s;
+  const confirm = h('button', { class: 'btn danger', disabled: true }, '카드를 골라 주세요');
+  const rows = (['S', 'H', 'C', 'D'] as const).map((suit) =>
+    h(
+      'div',
+      { class: 'deck-row' },
+      h('span', { class: 'suit-lbl' + (suit === 'H' || suit === 'D' ? ' red' : '') }, SUIT_SYMBOL[suit] + ' ' + SUIT_NAME[suit]),
+      ...s.deck
+        .filter((c) => c.suit === suit && !isWildJoker(c) && c.enh !== 'stone')
+        .sort((a, b) => b.rank - a.rank)
+        .map((c) => miniPick(c)),
+    ),
+  );
+  const extra = s.deck.filter((c) => isWildJoker(c) || c.enh === 'stone');
+  if (extra.length) rows.push(h('div', { class: 'deck-row' }, h('span', { class: 'suit-lbl' }, '특수'), ...extra.map((c) => miniPick(c))));
+  function miniPick(c: Card) {
+    const el = h('div', { class: 'mini pickable', title: cardDesc(c).join(' / ') }, cardFace(c));
+    el.addEventListener('click', () => {
+      pick = c.id;
+      panel.querySelectorAll('.mini.on').forEach((x) => x.classList.remove('on'));
+      el.classList.add('on');
+      audio.select(true);
+      confirm.disabled = false;
+      confirm.textContent = '이 카드 빼기 (' + s.removeCost + '냥)';
+    });
+    return el;
+  }
+  confirm.addEventListener('click', () => {
+    if (pick === null || !run) return;
+    const r = run.removeCard(pick);
+    if ('error' in r) {
+      audio.error();
+      toast(r.error);
+      return;
+    }
+    audio.whoosh(0);
+    audio.sell();
+    toast('카드를 덱에서 뺐어요');
+    merchantLine = '깔끔해졌구먼! 덱이 가벼워졌어.';
+    closeLayer();
+    renderAll();
+    save();
+  });
+  const panel = h(
+    'div',
+    { class: 'panel deck-view remove-view' },
+    h('h2', null, '✂️ 카드 빼기'),
+    h('p', { class: 'dim' }, '덱에서 뺄 카드 1장을 고르세요. 쓸모없는 카드를 빼면 원하는 카드가 더 자주 나와요. (지금 ' + s.deck.length + '장, 최소 20장)'),
+    ...rows,
+    h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => closeLayer() }, '그만두기'), confirm),
+  );
+  openLayer(panel);
 }
 
 // ───────── 보따리
@@ -1190,6 +1261,7 @@ function showHands() {
       'div',
       { class: 'panel hands-table' },
       h('h2', null, '📖 족보표'),
+      h('p', { class: 'level-tip' }, '족보 단계는 📘 ', h('b', null, '비급'), '으로 올려요. 상점 소모품 칸, 📚 비급 보따리, 푸른 도장 카드에서 얻을 수 있어요. 한 단계마다 끗과 배가 함께 올라요.'),
       h(
         'table',
         null,
@@ -1301,6 +1373,8 @@ function showHowTo() {
         h('li', null, h('b', null, '점수 = 끗 × 배'), '. 족보 기본값에 점수에 들어간 카드 숫자가 끗으로 더해져요.'),
         h('li', null, '판을 깨면 냥을 받아 ', h('b', null, '도깨비 장터'), '에서 부적과 소모품을 사요. 물건마다 한 번 ', h('b', null, '흥정'), '할 수 있는데, 깎아 줄 수도 값을 올릴 수도 있어요.'),
         h('li', null, h('b', null, '부적'), '(최대 5장)은 왼쪽부터 차례로 효과를 내요. +배 다음에 ×배가 오도록 순서를 맞추면 점수가 크게 뛰어요.'),
+        h('li', null, h('b', null, '족보 레벨업'), ': 📘 비급을 쓰면 그 족보가 한 단계 올라 끗·배가 커져요. 상점 소모품, 비급 보따리, 푸른 도장에서 얻어요.'),
+        h('li', null, h('b', null, '카드 빼기'), ': 상점에서 냥을 내고 덱의 카드를 직접 뺄 수 있어요. ', h('b', null, '조커'), '는 낼 때 가장 좋은 족보가 되도록 아무 카드로나 변해요.'),
         h('li', null, h('b', null, '보따리'), '를 열면 카드를 덱에 넣거나(카드 보따리), 방망이·도장을 덱 카드에 바로 쓸 수 있어요.'),
         h('li', null, h('b', null, '특수 카드'), ': 옥(×2배, 가끔 깨짐)·돌(+50끗)·도깨비(모든 무늬)·행운·쇠(손에 있으면 ×1.5) 등. ', h('b', null, '도장'), '은 다시 계산·냥·비급·방망이를 줘요.'),
         h('li', null, h('b', null, '요괴'), '는 규칙을 비틀어요. 상점에서 다음 요괴를 미리 확인하세요.'),

@@ -329,3 +329,39 @@ describe('보따리·새 소모품', () => {
     expect(run.s.hand.length).toBe(9);
   });
 });
+
+describe('조커·카드 빼기', () => {
+  const joker = (): Card => ({ id: nid++, rank: 15, suit: 'S', joker: true });
+  test('조커는 가장 좋은 족보로 변한다', () => {
+    expect(evaluate([...cards('KS KH'), joker()]).type).toBe('trips');
+    expect(evaluate([...cards('2H 7H 9H JH'), joker()]).type).toBe('flush');
+    expect(evaluate([...cards('5S 6H 8D 9C'), joker()]).type).toBe('straight');
+    expect(evaluate([...cards('9S 9H 9D 4C'), joker()]).type).toBe('quads');
+    expect(evaluate([...cards('QS QH'), joker(), joker()]).type).toBe('quads');
+    expect(evaluate([joker()]).type).toBe('high');
+  });
+  test('조커 점수: 변한 숫자의 끗으로 계산', () => {
+    const r = scorePlay({ played: [...cards('KS KH'), joker()], held: [], charms: [], levels, env, rng: new Rng(1), commit: true });
+    expect(r.hand.type).toBe('trips');
+    expect(r.total).toBe((35 + 30) * 3);
+  });
+  test('조커 부르기는 덱에 조커를 넣는다', () => {
+    const run = Run.create(31);
+    run.s.consumables = ['jokerCall'];
+    run.useCons(0);
+    expect(run.s.deck.filter((c) => c.joker).length).toBe(1);
+  });
+  test('상점 카드 빼기: 값이 오르고 최소 장수는 지킨다', () => {
+    const run = Run.create(32);
+    run.s.target = 1;
+    run.play([run.s.hand[0]]);
+    run.collectReward();
+    run.s.money = 100;
+    expect('ok' in run.removeCard(run.s.deck[0].id)).toBe(true);
+    expect(run.s.deck.length).toBe(51);
+    expect(run.s.money).toBe(97);
+    expect(run.s.removeCost).toBe(5);
+    run.s.deck = run.s.deck.slice(0, 20);
+    expect('error' in run.removeCard(run.s.deck[0].id)).toBe(true);
+  });
+});

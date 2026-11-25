@@ -1,6 +1,6 @@
 // 한 판(런) 전체의 진행: 구역·판·내기·버리기·보상·상점·보따리. 화면과 분리된 순수 로직이다.
 import { BOSSES, type BossDef, type BossKey, bossDef, NORMAL_BOSSES } from './bosses';
-import { type Card, ENH_KEYS, type Enh, SEAL_KEYS, standardDeck, SUITS } from './cards';
+import { type Card, ENH_KEYS, type Enh, JOKER_RANK, SEAL_KEYS, standardDeck, SUITS } from './cards';
 import { CHARM_KEYS, type CharmInst, type CharmKey, charmDef, newCharm, sellPrice } from './charms';
 import {
   type ConsKey,
@@ -31,6 +31,9 @@ export const STAGE_NAME = ['첫 손님', '큰손님', '요괴'];
 export const STAGE_REWARD = [3, 4, 5];
 /** 보따리에서 방망이·도장을 쓸 때 보여 주는 덱 카드 수 */
 export const PACK_TARGETS = 8;
+/** 덱을 이보다 작게 줄일 수는 없다 */
+export const MIN_DECK = 20;
+export const REMOVE_BASE = 3;
 
 export type Phase = 'round' | 'reward' | 'shop' | 'lost' | 'won';
 
@@ -98,6 +101,8 @@ export interface RunState {
   shop: ShopItem[];
   rerollCost: number;
   freeRerolls: number;
+  /** 상점의 카드 빼기 값 (쓸 때마다 오름) */
+  removeCost: number;
   pack: PackState | null;
   reward: Reward | null;
   stats: { best: number; bestHand: HandType | null; plays: number; rounds: number };
@@ -122,6 +127,7 @@ export class Run {
     state.pack ??= null;
     state.freeRerolls ??= 0;
     state.lastType ??= null;
+    state.removeCost ??= REMOVE_BASE;
     if (state.reward) state.reward.gains ??= [];
     this.s = state;
     this.rng = new Rng(state.rng);
@@ -158,6 +164,7 @@ export class Run {
       shop: [],
       rerollCost: 3,
       freeRerolls: 0,
+      removeCost: REMOVE_BASE,
       pack: null,
       reward: null,
       stats: { best: 0, bestHand: null, plays: 0, rounds: 0 },
@@ -411,6 +418,7 @@ export class Run {
     s.phase = 'shop';
     s.rerollCost = 3;
     s.freeRerolls = this.hasCharm('peddler') ? 1 : 0;
+    s.removeCost = REMOVE_BASE;
     s.pack = null;
     this.fillShop(true);
   }
@@ -457,6 +465,8 @@ export class Run {
 
   /** 보따리에서 나오는 새 카드 (아직 덱에 없음, id 0) */
   private rollCard(): Card {
+    // 가끔 조커
+    if (this.rng.chance(0.06)) return { id: 0, rank: JOKER_RANK, suit: 'S', joker: true };
     const c: Card = { id: 0, rank: this.rng.range(2, 14), suit: this.rng.pick(SUITS) };
     if (this.rng.chance(0.4)) c.enh = this.randomEnh();
     if (this.rng.chance(0.12)) c.seal = this.rng.pick(SEAL_KEYS);
@@ -708,7 +718,7 @@ export class Run {
         if (s.pack) s.pack.targets = s.pack.targets.filter((id) => !ids.includes(id));
         return { ok: true, note: `${ids.length}장을 태웠어요` };
       case 'rice':
-        for (const c of cards) c.rank = c.rank === 14 ? 2 : c.rank + 1;
+        for (const c of cards) if (!c.joker) c.rank = c.rank === 14 ? 2 : c.rank + 1;
         return { ok: true, note: '숫자가 올랐어요' };
       case 'mimic': {
         // 고른 순서가 아니라 화면 왼쪽 → 오른쪽 순서
@@ -718,6 +728,8 @@ export class Run {
         a.suit = b.suit;
         a.enh = b.enh;
         a.seal = b.seal;
+        a.joker = b.joker;
+        if (!b.joker) delete a.joker;
         if (!b.enh) delete a.enh;
         if (!b.seal) delete a.seal;
         return { ok: true, note: '둔갑했어요!' };
@@ -726,12 +738,29 @@ export class Run {
         for (let i = 0; i < 3; i++)
           addToDraw(this.addCard({ id: 0, rank: this.rng.range(11, 13), suit: this.rng.pick(SUITS), enh: this.randomEnh(false) }));
         return { ok: true, note: '그림카드 3장이 덱에 들어왔어요' };
+      case 'jokerCall':
+        addToDraw(this.addCard({ id: 0, rank: JOKER_RANK, suit: 'S', joker: true }));
+        return { ok: true, note: '조커가 덱에 들어왔어요!' };
       case 'numbers':
         for (let i = 0; i < 4; i++)
           addToDraw(this.addCard({ id: 0, rank: this.rng.range(2, 10), suit: this.rng.pick(SUITS), enh: this.randomEnh(false) }));
         return { ok: true, note: '숫자 카드 4장이 덱에 들어왔어요' };
     }
     return { error: '쓸 수 없는 소모품이에요' };
+  }
+
+  /** 상점 서비스: 덱에서 카드 한 장 빼기. 쓸 때마다 값이 2냥씩 오른다 */
+  removeCard(id: number): { ok: true } | Fail {
+    const s = this.s;
+    if (s.phase !== 'shop') return { error: '상점에서만 뺄 수 있어요' };
+    if (s.pack) return { error: '열린 보따리부터 정리해 주세요' };
+    if (s.money < s.removeCost) return { error: '냥이 모자라요' };
+    if (s.deck.length <= MIN_DECK) return { error: `덱은 ${MIN_DECK}장보다 적게 줄일 수 없어요` };
+    if (!s.deck.some((c) => c.id === id)) return { error: '없는 카드예요' };
+    s.deck = s.deck.filter((c) => c.id !== id);
+    s.money -= s.removeCost;
+    s.removeCost += 2;
+    return { ok: true };
   }
 
   /** 상점을 나가 다음 판으로 */

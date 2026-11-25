@@ -1,5 +1,5 @@
 // 낸 카드(1~5장)의 족보 판정
-import { type Card, hasSuit, isStone, SUITS } from './cards';
+import { type Card, cardChips, hasSuit, isStone, isWildJoker, type Suit, SUITS } from './cards';
 
 export type HandType =
   | 'high'
@@ -72,7 +72,7 @@ function straightOf(ranks: number[]): boolean {
   return u.join(',') === '2,3,4,5,14';
 }
 
-export function evaluate(cards: Card[]): HandResult {
+function evaluateBasic(cards: Card[]): HandResult {
   const n = cards.length;
   // 돌 카드는 숫자·무늬가 없어 족보 판정에서 빼고, 점수에는 언제나 들어간다
   const core = cards.filter((c) => !isStone(c));
@@ -111,4 +111,39 @@ export function evaluate(cards: Card[]): HandResult {
     [type, scoring] = ['high', keep(top ? [top] : [])];
   }
   return { type, scoring, contains };
+}
+
+/**
+ * 족보 판정. 조커가 있으면 가장 높은 족보(같으면 끗이 큰 쪽)가 되도록 숫자·무늬를 정한다.
+ * 이때 scoring 에는 변한 모습의 카드(같은 id 의 사본)가 들어간다.
+ */
+export function evaluate(cards: Card[]): HandResult {
+  const jokerIdx = cards.map((c, i) => (isWildJoker(c) ? i : -1)).filter((i) => i >= 0);
+  if (!jokerIdx.length) return evaluateBasic(cards);
+  const fixed = cards.filter((c) => !isWildJoker(c) && !isStone(c));
+  const suits: Suit[] = fixed.length ? [...new Set(fixed.map((c) => c.suit))] : ['S'];
+  const options: [number, Suit][] = [];
+  for (let r = 2; r <= 14; r++) for (const su of suits) options.push([r, su]);
+  // 조커가 셋 이상이면 앞의 두 장만 따로 고르고 나머지는 첫 조커를 따라간다
+  const j2 = jokerIdx[1];
+  let best: HandResult | null = null;
+  let bestKey = -1;
+  const tryWith = (a: [number, Suit], b: [number, Suit] | null) => {
+    const resolved = cards.map((c, i) => {
+      if (!isWildJoker(c)) return c;
+      const [rank, suit] = i === j2 && b ? b : a;
+      return { ...c, rank, suit };
+    });
+    const r = evaluateBasic(resolved);
+    const key = HAND_ORDER.indexOf(r.type) * 10000 + r.scoring.reduce((t, c) => t + cardChips(c), 0);
+    if (key > bestKey) {
+      bestKey = key;
+      best = r;
+    }
+  };
+  for (const a of options) {
+    if (j2 === undefined) tryWith(a, null);
+    else for (const b of options) tryWith(a, b);
+  }
+  return best!;
 }

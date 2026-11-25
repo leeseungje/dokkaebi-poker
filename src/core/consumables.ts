@@ -22,7 +22,8 @@ export type MalletKey =
   | 'rice'
   | 'mimic'
   | 'masks'
-  | 'numbers';
+  | 'numbers'
+  | 'jokerCall';
 export type SealKey = 'sealRed' | 'sealGold' | 'sealBlue' | 'sealPurple';
 export type ConsKey = MalletKey | SealKey | `book:${HandType}`;
 
@@ -60,6 +61,7 @@ export const MALLETS: Record<MalletKey, ConsDef> = {
   rice: { name: '키 크는 떡', icon: '🍡', desc: '고른 카드 최대 2장의 숫자를 1 올려요 (A는 2가 돼요)', price: 3, select: [1, 2], kind: 'mallet' },
   mimic: { name: '둔갑술', icon: '🌀', desc: '카드 2장을 고르면 왼쪽 카드가 오른쪽 카드와 똑같이 둔갑해요', price: 4, select: [2, 2], kind: 'mallet' },
   masks: { name: '탈 보따리', icon: '👺', desc: '각인된 그림카드(J·Q·K) 3장을 덱에 새로 넣어요', price: 4, select: [0, 0], kind: 'mallet' },
+  jokerCall: { name: '조커 부르기', icon: '🃏', desc: '덱에 조커 1장을 넣어요 (낼 때 아무 숫자·무늬로 변해요)', price: 5, select: [0, 0], kind: 'mallet' },
   numbers: { name: '숫자 씨앗', icon: '🌱', desc: '각인된 숫자 카드 4장을 덱에 새로 넣어요', price: 4, select: [0, 0], kind: 'mallet' },
 };
 export const MALLET_KEYS = Object.keys(MALLETS) as MalletKey[];

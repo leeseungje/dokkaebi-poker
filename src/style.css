@@ -2169,3 +2169,48 @@ button {
 .mini .stone-mark small {
   display: none;
 }
+
+/* 조커 */
+.face.joker {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.8), transparent 45%),
+    conic-gradient(from 200deg at 50% 50%, #ffe6a8, #ffc7d6, #c9e4ff, #d7ffd6, #ffe6a8);
+  border: 2px solid #d48a1c;
+  color: #6a1f8a;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45), 0 0 14px rgba(244, 194, 79, 0.55);
+}
+.face.joker .corner i {
+  font-size: calc(var(--cw) * 0.13);
+  font-weight: 900;
+}
+.face.joker .figure small {
+  border-color: #6a1f8a;
+}
+/* 카드 빼기 */
+.mini.pickable {
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.mini.pickable:hover {
+  transform: translateY(-3px);
+}
+.mini.on {
+  transform: translateY(-6px);
+}
+.mini.on .face {
+  box-shadow: 0 0 0 3px #e0574a, 0 0 14px rgba(224, 87, 74, 0.7);
+}
+.level-tip {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(63, 142, 252, 0.15);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.level-tip b {
+  color: #9cc4ff;
+}
+.portrait .shop-foot .btn.ghost {
+  font-size: 15px;
+}
