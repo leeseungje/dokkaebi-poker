@@ -26,6 +26,13 @@ class Audio {
   private musicTimer: number | null = null;
   private musicOn = false;
   private lastPlay = new Map<string, number>();
+  /** 지금 울리고 있는 소리 수 (대략) */
+  private voices = 0;
+  private track(endTime: number) {
+    if (!this.ctx) return;
+    this.voices++;
+    setTimeout(() => this.voices--, Math.max(0, (endTime - this.ctx.currentTime) * 1000));
+  }
 
   /** 사용자 동작 안에서 처음 불러야 소리가 난다 (브라우저 자동재생 정책) */
   unlock() {
@@ -33,20 +40,42 @@ class Audio {
       if (this.ctx.state === 'suspended') void this.ctx.resume();
       return;
     }
-    const ctx = new AudioContext();
+    // 'balanced' 는 버퍼를 조금 넉넉히 잡아서 휴대폰에서 소리가 끊기는(깨지는) 일을 줄인다
+    let ctx: AudioContext;
+    try {
+      ctx = new AudioContext({ latencyHint: 'balanced' });
+    } catch {
+      ctx = new AudioContext();
+    }
     this.ctx = ctx;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -16;
-    comp.knee.value = 12;
+    comp.threshold.value = -18;
+    comp.knee.value = 10;
     comp.ratio.value = 4;
-    comp.attack.value = 0.004;
-    comp.release.value = 0.2;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
+    // 여러 소리가 한꺼번에 겹쳐도 한계를 넘지 않게 막는 리미터
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -4;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.12;
+    // 그래도 넘치는 순간은 딱딱하게 잘리지 않고 둥글게 눌리도록
+    const soft = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * 1.2) / Math.tanh(1.2);
+    }
+    soft.curve = curve;
     this.master = ctx.createGain();
-    this.master.gain.value = 0.9;
-    comp.connect(this.master).connect(ctx.destination);
+    this.master.gain.value = 0.8;
+    comp.connect(limiter).connect(this.master).connect(soft).connect(ctx.destination);
 
+    // 잔향은 짧은 모노 임펄스로 (계산량이 절반 이하)
     this.reverb = ctx.createConvolver();
-    this.reverb.buffer = this.impulse(2.2, 2.6);
+    this.reverb.buffer = this.impulse(1.5, 2.8);
     this.reverbSend = ctx.createGain();
     this.reverbSend.gain.value = 0.22;
     this.reverbSend.connect(this.reverb).connect(comp);
@@ -65,6 +94,12 @@ class Audio {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     if (this.musicOn) this.startMusic();
+    // 탭을 숨기면 소리를 멈췄다가 돌아오면 이어서 (밀린 소리가 몰려 깨지는 것 방지)
+    document.addEventListener('visibilitychange', () => {
+      if (!this.ctx) return;
+      if (document.hidden) void this.ctx.suspend();
+      else void this.ctx.resume();
+    });
   }
 
   setSfx(v: number) {
@@ -79,8 +114,8 @@ class Audio {
   private impulse(sec: number, decay: number): AudioBuffer {
     const ctx = this.ctx!;
     const len = Math.floor(ctx.sampleRate * sec);
-    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let ch = 0; ch < 2; ch++) {
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    for (let ch = 0; ch < 1; ch++) {
       const d = buf.getChannelData(ch);
       for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** decay;
     }
@@ -105,9 +140,11 @@ class Audio {
   }
 
   /** 가야금 뜯는 소리: 카플러스-스트롱 방식 대신 배음 몇 개 + 빠른 필터 감쇠로 가볍게 */
-  pluck(hz: number, opts: { vol?: number; decay?: number; when?: number; out?: AudioNode; bright?: number } = {}) {
+  pluck(hz: number, opts: { vol?: number; decay?: number; when?: number; out?: AudioNode; bright?: number; lite?: boolean } = {}) {
     const ctx = this.ctx;
     if (!ctx) return;
+    // 동시에 울리는 소리가 너무 많으면 배경 음악 음은 건너뛴다 (처리가 밀려 깨지는 것 방지)
+    if (opts.lite && this.voices > 40) return;
     const t = ctx.currentTime + (opts.when ?? 0);
     const out = opts.out ?? this.sfxGain;
     const vol = opts.vol ?? 0.25;
@@ -120,12 +157,18 @@ class Audio {
     const g = ctx.createGain();
     this.env(g, t, vol, 0.004, decay);
     filter.connect(g).connect(out);
-    const partials: [number, number, OscillatorType][] = [
-      [1, 1, 'triangle'],
-      [2, 0.35, 'sine'],
-      [3, 0.18, 'sine'],
-      [4.02, 0.08, 'sine'],
-    ];
+    const partials: [number, number, OscillatorType][] = opts.lite
+      ? [
+          [1, 1, 'triangle'],
+          [2, 0.3, 'sine'],
+        ]
+      : [
+          [1, 1, 'triangle'],
+          [2, 0.35, 'sine'],
+          [3, 0.18, 'sine'],
+          [4.02, 0.08, 'sine'],
+        ];
+    this.track(t + decay + 0.1);
     for (const [mul, amp, type] of partials) {
       const o = ctx.createOscillator();
       o.type = type;
@@ -139,7 +182,7 @@ class Audio {
       o.stop(t + decay + 0.1);
     }
     // 손톱이 줄에 닿는 짧은 잡음
-    this.noise({ when: opts.when, vol: vol * 0.25, dur: 0.025, freq: hz * 6, q: 1, out });
+    if (!opts.lite) this.noise({ when: opts.when, vol: vol * 0.25, dur: 0.025, freq: Math.min(hz * 6, 9000), q: 1, out });
   }
 
   noise(o: { when?: number; vol?: number; dur?: number; freq?: number; freqEnd?: number; q?: number; type?: BiquadFilterType; out?: AudioNode }) {
@@ -413,6 +456,8 @@ class Audio {
     let melody = 5;
     const drone = this.startDrone();
     const schedule = () => {
+      // 탭이 뒤로 갔다 오면 타이머가 늦게 깨어난다. 밀린 박자는 버리고 지금부터 다시 친다
+      if (next < ctx.currentTime) next = ctx.currentTime + 0.05;
       while (next < ctx.currentTime + 1.2) {
         const out = this.musicGain;
         // 장단: 덩 - 기덕 쿵 - 더러러러
@@ -424,8 +469,8 @@ class Audio {
         // 가락: 한 음씩 이웃한 음으로 걷고, 가끔 쉰다
         if (b % 3 === 0 && Math.random() < 0.72) {
           melody = Math.max(2, Math.min(12, melody + [-2, -1, -1, 1, 1, 2][Math.floor(Math.random() * 6)]));
-          this.pluck(noteHz(melody, -1), { when: t, vol: 0.13, decay: 1.6, out, bright: 5 });
-          if (Math.random() < 0.25) this.pluck(noteHz(melody + 1, -1), { when: t + beat / 2, vol: 0.08, decay: 1.2, out, bright: 5 });
+          this.pluck(noteHz(melody, -1), { when: t, vol: 0.13, decay: 1.6, out, bright: 5, lite: true });
+          if (Math.random() < 0.25) this.pluck(noteHz(melody + 1, -1), { when: t + beat / 2, vol: 0.08, decay: 1.2, out, bright: 5, lite: true });
         }
         if (b === 0 && bar % 48 === 0) this.gong({ when: t, vol: 0.08, pitch: 98, dur: 3 });
         bar++;
