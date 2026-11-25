@@ -1009,7 +1009,7 @@ async function gameOver() {
     h('h2', null, '장터에서 쫓겨났어요'),
     h('p', null, `${s.ante}구역 ${STAGE_NAME[s.stage]} · ${fmt(s.score)} / ${fmt(s.target)}`),
     statsBlock(),
-    h('div', { class: 'btn-row' }, h('button', { class: 'btn primary big', onclick: () => (closeLayer(), newRun()) }, '다시 도전'), h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showTitle()) }, '처음 화면')),
+    h('div', { class: 'btn-row' }, h('button', { class: 'btn primary big', onclick: () => (closeLayer(), newRun()) }, '다시 도전'), h('button', { class: 'btn ghost', onclick: () => goTitle() }, '처음 화면')),
   );
   await wait(700);
   openLayer(box, false);
@@ -1032,10 +1032,17 @@ function victory() {
       { class: 'btn-row' },
       h('button', { class: 'btn primary big', onclick: () => (closeLayer(), goEndless()) }, '♾️ 끝없는 장터로 계속'),
       h('button', { class: 'btn ghost', onclick: () => (closeLayer(), newRun()) }, '새로 시작'),
-      h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showTitle()) }, '처음 화면'),
+      h('button', { class: 'btn ghost', onclick: () => goTitle() }, '처음 화면'),
     ),
   );
   openLayer(box, false);
+}
+
+function goTitle() {
+  run = null;
+  clearTable();
+  closeLayer();
+  showTitle();
 }
 
 function goEndless() {
