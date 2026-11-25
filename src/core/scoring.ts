@@ -1,5 +1,5 @@
 // 한 번 낸 패의 점수 계산. 화면 연출을 위해 한 단계씩 기록(steps)을 남긴다.
-import { type Card, cardChips } from './cards';
+import { type Card, cardChips, isStone, rankChips } from './cards';
 import { type CharmInst, type Ctx, type Effect, type ScoreEnv, effectiveCharm } from './charms';
 import { evaluate, type HandResult, type HandType, handValue } from './hands';
 import type { Rng } from './rng';
@@ -40,7 +40,11 @@ export interface ScoreInput {
   rng: Rng;
   debuff?: (c: Card) => boolean;
   /** 요괴 규칙으로 이 패가 0점인지 (족보를 알아야 판단할 수 있어서 함수로 받는다) */
-  zero?: (type: HandType) => boolean;
+  zero?: (type: HandType, playedCount: number) => boolean;
+  /** 요괴: 특수 카드 효과 무효 */
+  noEnh?: boolean;
+  /** 요괴: 이 순서의 부적은 효과 없음 */
+  disabledCharm?: number;
   /** false 면 부적의 누적 값을 건드리지 않는다 (미리보기·자동 플레이 계산용) */
   commit: boolean;
 }
@@ -64,7 +68,8 @@ export function scorePlay(input: ScoreInput): ScoreResult {
     if (e.money) money += e.money;
     steps.push({ kind, ...extra, chips: e.chips, mult: e.mult, xmult: e.xmult, money: e.money, now: { chips, mult } });
   };
-  const active = charms.map((_, i) => effectiveCharm(charms, i));
+  const active = charms.map((_, i) => (i === input.disabledCharm ? null : effectiveCharm(charms, i)));
+  const noEnh = !!input.noEnh;
 
   for (const a of active) if (a && !a[2]) a[0].before?.(ctx, a[1]);
 
@@ -77,15 +82,18 @@ export function scorePlay(input: ScoreInput): ScoreResult {
     for (const a of active) if (a?.[0].retrig) reps += a[0].retrig(c, i, ctx, a[1]);
     for (let r = 0; r < reps; r++) {
       if (r > 0) steps.push({ kind: 'retrig', cardId: c.id, now: { chips, mult } });
-      push('card', { chips: cardChips(c) }, { cardId: c.id });
-      if (c.enh === 'mult') push('enh', { mult: 4 }, { cardId: c.id });
-      if (c.enh === 'jade') push('enh', { xmult: 2 }, { cardId: c.id });
-      if (c.enh === 'lucky') {
+      push('card', { chips: noEnh ? (isStone(c) ? 0 : rankChips(c.rank)) : cardChips(c) }, { cardId: c.id });
+      if (!noEnh && c.enh === 'mult') push('enh', { mult: 4 }, { cardId: c.id });
+      if (!noEnh && c.enh === 'jade') push('enh', { xmult: 2 }, { cardId: c.id });
+      if (!noEnh && c.enh === 'lucky') {
         const luck = env.luck ?? 1;
         if (rng.chance(0.2 * luck)) push('lucky', { mult: 20 }, { cardId: c.id });
         if (rng.chance((1 / 15) * luck)) push('lucky', { money: 20 }, { cardId: c.id });
       }
       if (c.seal === 'gold') push('enh', { money: 3 }, { cardId: c.id });
+      if (c.edition === 'foil') push('enh', { chips: 50 }, { cardId: c.id });
+      if (c.edition === 'holo') push('enh', { mult: 10 }, { cardId: c.id });
+      if (c.edition === 'poly') push('enh', { xmult: 1.5 }, { cardId: c.id });
       active.forEach((a, k) => {
         const e = a?.[0].card?.(c, ctx, a[1]);
         if (e) push('charm', e, { cardId: c.id, charmUid: charms[k].uid });
@@ -95,7 +103,7 @@ export function scorePlay(input: ScoreInput): ScoreResult {
 
   for (const c of held) {
     if (debuff?.(c)) continue;
-    if (c.enh === 'steel') push('held', { xmult: 1.5 }, { cardId: c.id });
+    if (!noEnh && c.enh === 'steel') push('held', { xmult: 1.5 }, { cardId: c.id });
     active.forEach((a, k) => {
       const e = a?.[0].held?.(c, ctx, a[1]);
       if (e) push('held', e, { cardId: c.id, charmUid: charms[k].uid });
@@ -105,10 +113,15 @@ export function scorePlay(input: ScoreInput): ScoreResult {
   active.forEach((a, k) => {
     const e = a?.[0].hand?.(ctx, a[1]);
     if (e) push('charm', e, { charmUid: charms[k].uid });
+    // 부적의 광택은 그 부적 차례 끝에
+    const ed = charms[k].edition;
+    if (a && ed === 'foil') push('charm', { chips: 50 }, { charmUid: charms[k].uid });
+    if (a && ed === 'holo') push('charm', { mult: 10 }, { charmUid: charms[k].uid });
+    if (a && ed === 'poly') push('charm', { xmult: 1.5 }, { charmUid: charms[k].uid });
   });
 
   let total = Math.floor(chips * mult);
-  if (input.zero?.(hand.type)) {
+  if (input.zero?.(hand.type, played.length)) {
     total = 0;
     steps.push({ kind: 'zero', now: { chips, mult } });
   }
@@ -116,7 +129,7 @@ export function scorePlay(input: ScoreInput): ScoreResult {
   // 옥 카드는 쓸 때마다 1/4 확률로 깨진다
   const broken: number[] = [];
   for (const c of hand.scoring)
-    if (c.enh === 'jade' && !debuff?.(c) && rng.chance(0.25)) {
+    if (!noEnh && c.enh === 'jade' && !debuff?.(c) && rng.chance(0.25)) {
       broken.push(c.id);
       steps.push({ kind: 'break', cardId: c.id, now: { chips, mult } });
     }

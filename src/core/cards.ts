@@ -37,6 +37,8 @@ export interface Card {
   seal?: Seal;
   /** 조커: 낼 때 가장 좋은 족보가 되도록 아무 숫자·무늬로 변한다. 손에 있을 때는 rank 15 */
   joker?: boolean;
+  /** 광택: 금박(+50끗)·은박(+10배)·오색(×1.5배) */
+  edition?: 'foil' | 'holo' | 'poly';
 }
 
 export const JOKER_RANK = 15;
@@ -85,5 +87,6 @@ export function cardDesc(c: Card): string[] {
   if (c.joker) out.push('조커: 낼 때 가장 좋은 족보가 되도록 아무 숫자·무늬로 변해요');
   if (c.enh) out.push(`${ENH_INFO[c.enh].name}: ${ENH_INFO[c.enh].desc}`);
   if (c.seal) out.push(`${SEAL_INFO[c.seal].name}: ${SEAL_INFO[c.seal].desc}`);
+  if (c.edition) out.push({ foil: '금박: +50끗', holo: '은박: +10배', poly: '오색: ×1.5배' }[c.edition]);
   return out;
 }

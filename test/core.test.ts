@@ -120,7 +120,7 @@ describe('점수 계산', () => {
 
 describe('런 진행', () => {
   test('시작 상태', () => {
-    const run = Run.create(7);
+    const run = Run.create(7).begin();
     expect(run.s.hand.length).toBe(8);
     expect(run.s.draw.length).toBe(44);
     expect(run.s.target).toBe(300);
@@ -130,26 +130,26 @@ describe('런 진행', () => {
     expect(playRun(42).run.save()).toEqual(playRun(42).run.save());
   });
   test('저장 후 불러와도 똑같이 이어짐', () => {
-    const a = Run.create(9);
+    const a = Run.create(9).begin();
     const b = Run.load(a.save());
     a.play(a.s.hand.slice(0, 2));
     b.play(b.s.hand.slice(0, 2));
     expect(a.save()).toEqual(b.save());
   });
   test('잘못된 선택은 거절', () => {
-    const run = Run.create(3);
+    const run = Run.create(3).begin();
     expect('error' in run.play([])).toBe(true);
     expect('error' in run.play(run.s.hand.slice(0, 6))).toBe(true);
     expect('error' in run.play([99999])).toBe(true);
   });
   test('버리기 3번 뒤에는 거절', () => {
-    const run = Run.create(3);
+    const run = Run.create(3).begin();
     for (let i = 0; i < 3; i++) expect('ok' in run.discard([run.s.hand[0]])).toBe(true);
     expect('error' in run.discard([run.s.hand[0]])).toBe(true);
     expect(run.s.hand.length).toBe(8);
   });
   test('판을 깨면 보상 → 상점 → 다음 판', () => {
-    const run = Run.create(5);
+    const run = Run.create(5).begin();
     run.s.target = 1;
     const out = run.play([run.s.hand[0]]);
     expect('won' in out && out.won).toBe(true);
@@ -160,17 +160,19 @@ describe('런 진행', () => {
     expect(run.s.money).toBe(4 + total);
     expect(run.s.shop.length).toBe(6);
     run.nextRound();
+    expect(run.s.phase).toBe('select');
+    run.begin();
     expect(run.s.stage).toBe(1);
     expect(run.s.target).toBe(450);
   });
   test('내기를 다 쓰면 패배', () => {
-    const run = Run.create(5);
+    const run = Run.create(5).begin();
     run.s.target = 1e9;
     for (let i = 0; i < 4; i++) run.play([run.s.hand[0]]);
     expect(run.s.phase).toBe('lost');
   });
   test('상점: 구매·흥정·판매·소모품', () => {
-    const run = Run.create(11);
+    const run = Run.create(11).begin();
     run.s.target = 1;
     run.play([run.s.hand[0]]);
     run.collectReward();
@@ -192,7 +194,7 @@ describe('런 진행', () => {
     expect(run.s.levels.pair).toBe(2);
   });
   test('카드를 고르는 소모품은 판 중에만', () => {
-    const run = Run.create(12);
+    const run = Run.create(12).begin();
     run.s.consumables = ['fire', 'copy'];
     const [a, b] = run.s.hand;
     expect('ok' in run.useCons(0, [a, b])).toBe(true);
@@ -257,7 +259,7 @@ describe('특수 카드·도장', () => {
 
 describe('보따리·새 소모품', () => {
   const shopRun = (seed: number) => {
-    const run = Run.create(seed);
+    const run = Run.create(seed).begin();
     run.s.target = 1;
     run.play([run.s.hand[0]]);
     run.collectReward();
@@ -295,7 +297,7 @@ describe('보따리·새 소모품', () => {
     for (const id of ids) expect(run.card(id).suit).toBe('H');
   });
   test('문양 바꾸기는 최대 3장, 둔갑술, 탈 보따리', () => {
-    const run = Run.create(24);
+    const run = Run.create(24).begin();
     run.s.consumables = ['indigo', 'mimic'];
     expect('error' in run.useCons(0, run.s.hand.slice(0, 4))).toBe(true);
     run.useCons(0, run.s.hand.slice(0, 3));
@@ -310,7 +312,7 @@ describe('보따리·새 소모품', () => {
     expect(run.s.draw.length).toBe(draw + 3);
   });
   test('보라 도장을 버리면 방망이, 푸른 도장은 비급', () => {
-    const run = Run.create(25);
+    const run = Run.create(25).begin();
     const id = run.s.hand[0];
     run.card(id).seal = 'purple';
     const r = run.discard([id]);
@@ -326,6 +328,7 @@ describe('보따리·새 소모품', () => {
     run.s.charms = [newCharm('backpack', 90), newCharm('crystal', 91), newCharm('peddler', 92)];
     expect(run.maxCons).toBe(3);
     run.nextRound();
+    run.begin();
     expect(run.s.hand.length).toBe(9);
   });
 });
@@ -346,13 +349,13 @@ describe('조커·카드 빼기', () => {
     expect(r.total).toBe((35 + 30) * 3);
   });
   test('조커 부르기는 덱에 조커를 넣는다', () => {
-    const run = Run.create(31);
+    const run = Run.create(31).begin();
     run.s.consumables = ['jokerCall'];
     run.useCons(0);
     expect(run.s.deck.filter((c) => c.joker).length).toBe(1);
   });
   test('상점 카드 빼기: 값이 오르고 최소 장수는 지킨다', () => {
-    const run = Run.create(32);
+    const run = Run.create(32).begin();
     run.s.target = 1;
     run.play([run.s.hand[0]]);
     run.collectReward();

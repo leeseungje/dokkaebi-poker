@@ -1,6 +1,8 @@
 // 도깨비 부적: 점수 계산 규칙을 비트는 특수 카드 (최대 5장)
 import { type Card, hasSuit, isBlack, isFace, isRed, isStone, SUITS } from './cards';
 import type { HandResult, HandType } from './hands';
+import { EXTRA_CHARMS } from './charms-extra';
+import type { Edition } from './meta';
 import type { Rng } from './rng';
 
 export interface Effect {
@@ -17,6 +19,7 @@ export interface CharmInst {
   uid: number;
   /** 누적형 부적의 값 */
   n: number;
+  edition?: Edition;
 }
 
 /** 점수 계산 때 부적이 보는 판 상황 */
@@ -34,6 +37,23 @@ export interface ScoreEnv {
   deckEnhanced: number;
   /** 행운 카드 확률 배수 (노름꾼) */
   luck: number;
+  /** 이번 판의 첫 내기인지 */
+  firstPlay?: boolean;
+  ante?: number;
+  /** 모든 족보 단계에서 1을 뺀 합 (비급으로 올린 횟수) */
+  levelSum?: number;
+  /** 뽑을 더미에 남은 카드 수 */
+  drawLeft?: number;
+  /** 가진 부적 수 */
+  charmCount?: number;
+  /** 이번 판에 이미 낸 횟수 */
+  playIndex?: number;
+  /** 이번 내기를 포함해 남은 내기 */
+  playsLeftNow?: number;
+  /** 덱의 조커 수 */
+  deckJokers?: number;
+  /** 판이 끝날 때 쓰는 난수 */
+  rand?: () => number;
 }
 
 export interface Ctx {
@@ -47,7 +67,8 @@ export interface Ctx {
 export interface CharmDef {
   name: string;
   icon: string;
-  rarity: 1 | 2 | 3;
+  /** 1 흔함, 2 귀함, 3 희귀, 4 전설 (전설은 부적 보따리·희귀 노리개에서만) */
+  rarity: 1 | 2 | 3 | 4;
   price: number;
   desc: (self: CharmInst) => string;
   /** 처음 얻었을 때 누적 값 */
@@ -60,7 +81,9 @@ export interface CharmDef {
   hand?: (ctx: Ctx, self: CharmInst) => Effect | undefined;
   /** 점수 계산 뒤. true 를 돌려주면 부적이 사라진다 */
   after?: (ctx: Ctx, self: CharmInst) => boolean | void;
-  /** 판을 깼을 때 받는 냥 */
+  /** 카드를 버렸을 때 */
+  discard?: (cards: Card[], self: CharmInst) => void;
+  /** 판을 깼을 때 받는 냥 (누적 값을 키워도 된다) */
   roundEnd?: (env: ScoreEnv, self: CharmInst) => number;
   /** 다른 부적 효과를 흉내 낼 수 없는 부적 */
   noCopy?: boolean;
@@ -68,7 +91,7 @@ export interface CharmDef {
 
 const has = (ctx: Ctx, t: HandType) => ctx.hand.contains.has(t);
 
-export const CHARMS = {
+const BASE_CHARMS = {
   jangseung: {
     name: '장승',
     icon: '🪵',
@@ -401,6 +424,169 @@ export const CHARMS = {
     price: 6,
     desc: () => '판을 깰 때마다 도깨비 방망이 하나를 받아요 (자리가 있으면)',
   },
+  rooster: {
+    name: '장닭',
+    icon: '🐓',
+    rarity: 1,
+    price: 5,
+    desc: () => '판의 첫 번째 내기라면 ×1.5배',
+    hand: (ctx) => (ctx.env.firstPlay ? { xmult: 1.5 } : undefined),
+  },
+  imugi: {
+    name: '이무기',
+    icon: '🐍',
+    rarity: 2,
+    price: 7,
+    desc: () => '비급으로 올린 족보 단계 1마다 +2배',
+    hand: (ctx) => ((ctx.env.levelSum ?? 0) > 0 ? { mult: (ctx.env.levelSum ?? 0) * 2 } : undefined),
+  },
+  archery: {
+    name: '활터',
+    icon: '🏹',
+    rarity: 1,
+    price: 5,
+    desc: () => 'A 카드가 점수에 들어갈 때마다 +8배',
+    card: (c) => (!isStone(c) && c.rank === 14 ? { mult: 8 } : undefined),
+  },
+  saltJar: {
+    name: '소금 항아리',
+    icon: '🧂',
+    rarity: 1,
+    price: 4,
+    desc: () => '작은 숫자(2~5) 카드가 점수에 들어갈 때마다 +15끗',
+    card: (c) => (!isStone(c) && c.rank >= 2 && c.rank <= 5 ? { chips: 15 } : undefined),
+  },
+  fullMoon: {
+    name: '보름달',
+    icon: '🌕',
+    rarity: 2,
+    price: 6,
+    desc: () => '지금 구역 1마다 +3배',
+    hand: (ctx) => ({ mult: (ctx.env.ante ?? 1) * 3 }),
+  },
+  blueDragon: {
+    name: '청룡',
+    icon: '🐉',
+    rarity: 3,
+    price: 8,
+    desc: () => '포카드·스트레이트 플러시·파이브카드라면 ×3배',
+    hand: (ctx) => (has(ctx, 'quads') || has(ctx, 'straightFlush') || has(ctx, 'fiveKind') ? { xmult: 3 } : undefined),
+  },
+  peacock: {
+    name: '공작 깃털',
+    icon: '🦚',
+    rarity: 2,
+    price: 6,
+    desc: () => '특수 카드가 점수에 들어갈 때마다 +4배',
+    card: (c) => (c.enh ? { mult: 4 } : undefined),
+  },
+  amulet: {
+    name: '액막이 부적',
+    icon: '🧿',
+    rarity: 2,
+    price: 6,
+    desc: () => '요괴 판에서 ×2배',
+    hand: (ctx) => (ctx.env.isBoss ? { xmult: 2 } : undefined),
+  },
+  barleyTea: {
+    name: '보리차',
+    icon: '🍵',
+    rarity: 1,
+    price: 4,
+    start: 80,
+    desc: (s) => `+${s.n}끗. 패를 낼 때마다 5끗씩 줄어요`,
+    hand: (_ctx, s) => (s.n > 0 ? { chips: s.n } : undefined),
+    after: (_ctx, s) => {
+      s.n -= 5;
+      return s.n <= 0;
+    },
+  },
+  ferryCoin: {
+    name: '노잣돈',
+    icon: '🪙',
+    rarity: 1,
+    price: 5,
+    desc: () => '판을 깰 때 남은 버리기 1회마다 +1냥',
+    roundEnd: (env) => env.discardsLeft,
+  },
+  owl: {
+    name: '부엉이',
+    icon: '🦉',
+    rarity: 1,
+    price: 4,
+    desc: () => '뽑을 더미에 남은 카드 1장마다 +2끗',
+    hand: (ctx) => ((ctx.env.drawLeft ?? 0) > 0 ? { chips: (ctx.env.drawLeft ?? 0) * 2 } : undefined),
+  },
+  newYear: {
+    name: '세뱃돈',
+    icon: '🧧',
+    rarity: 2,
+    price: 6,
+    start: 1,
+    desc: (s) => `판을 깰 때마다 +${s.n}냥, 깰 때마다 1냥씩 커져요`,
+    roundEnd: (_env, s) => s.n++,
+  },
+  roofer: {
+    name: '기와장이',
+    icon: '🧱',
+    rarity: 2,
+    price: 6,
+    desc: () => '돌 카드가 점수에 들어갈 때마다 ×1.3배',
+    card: (c) => (isStone(c) ? { xmult: 1.3 } : undefined),
+  },
+  kite: {
+    name: '방패연',
+    icon: '🪁',
+    rarity: 1,
+    price: 5,
+    desc: () => '카드를 3장 이하로 내면 +12배',
+    hand: (ctx) => (ctx.played.length <= 3 ? { mult: 12 } : undefined),
+  },
+  hongsi: {
+    name: '홍시',
+    icon: '🍅',
+    rarity: 1,
+    price: 4,
+    desc: () => '♥·♦ 카드가 점수에 들어갈 때마다 +12끗',
+    card: (c) => (isRed(c) ? { chips: 12 } : undefined),
+  },
+  dragonKing: {
+    name: '용왕',
+    icon: '🐲',
+    rarity: 4,
+    price: 20,
+    desc: () => '전설. 그림카드가 점수에 들어갈 때마다 ×1.5배',
+    card: (c) => (isFace(c) ? { xmult: 1.5 } : undefined),
+  },
+  bulgasari: {
+    name: '불가사리',
+    icon: '🦔',
+    rarity: 4,
+    price: 20,
+    desc: () => '전설. 손에 든 쇠 카드마다 ×1.5배가 한 번 더',
+    held: (c) => (c.enh === 'steel' ? { xmult: 1.5 } : undefined),
+  },
+  rainbowBridge: {
+    name: '오작교',
+    icon: '🌈',
+    rarity: 4,
+    price: 20,
+    start: 10,
+    desc: (s) => `전설. ×${(s.n / 10).toFixed(1)}배. 판을 깰 때마다 ×0.5배씩 커져요`,
+    hand: (_ctx, s) => (s.n > 10 ? { xmult: s.n / 10 } : undefined),
+    roundEnd: (_env, s) => {
+      s.n += 5;
+      return 0;
+    },
+  },
+  crown: {
+    name: '도깨비 왕관',
+    icon: '👑',
+    rarity: 4,
+    price: 20,
+    desc: () => '전설. 가진 부적 1장마다 ×1.25배',
+    hand: (ctx) => ({ xmult: 1.25 ** (ctx.env.charmCount ?? 1) }),
+  },
   mirror: {
     name: '업경',
     icon: '🪞',
@@ -411,8 +597,9 @@ export const CHARMS = {
   },
 } satisfies Record<string, CharmDef>;
 
-export type CharmKey = keyof typeof CHARMS;
-export const CHARM_KEYS = Object.keys(CHARMS) as CharmKey[];
+export const CHARMS: Record<string, CharmDef> = { ...BASE_CHARMS, ...EXTRA_CHARMS };
+export type CharmKey = string;
+export const CHARM_KEYS = Object.keys(CHARMS);
 export const charmDef = (k: CharmKey): CharmDef => CHARMS[k];
 
 export function newCharm(key: CharmKey, uid: number): CharmInst {

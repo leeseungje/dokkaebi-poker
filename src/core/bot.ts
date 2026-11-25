@@ -1,7 +1,7 @@
 // 간단한 자동 플레이어. 밸런스 시뮬레이션과 테스트에 쓴다.
 import { charmDef, type CharmKey } from './charms';
 import { consDef } from './consumables';
-import { MAX_SELECT, Run } from './run';
+import { MAX_SELECT, Run, type RunOptions } from './run';
 
 function subsets<T>(arr: T[], max: number): T[][] {
   const out: T[][] = [];
@@ -30,6 +30,7 @@ export function bestPlay(run: Run): { ids: number[]; total: number } {
 /** 판 하나를 끝까지 둔다 */
 export function playRound(run: Run) {
   const s = run.s;
+  if (s.phase === 'select') run.begin();
   while (s.phase === 'round') {
     // 쓸 수 있는 비급·금 나와라는 바로 쓴다
     for (let i = s.consumables.length - 1; i >= 0; i--) if (consDef(s.consumables[i]).select[0] === 0) run.useCons(i);
@@ -74,13 +75,14 @@ export function shopBot(run: Run) {
       if ('error' in res) run.skipPack();
     }
   }
+  if (s.shopVoucher && s.money >= run.voucherPrice + 5) run.buyVoucher();
   for (let i = s.consumables.length - 1; i >= 0; i--) if (consDef(s.consumables[i]).select[0] === 0) run.useCons(i);
   run.nextRound();
 }
 
 /** 런 하나를 끝까지. 도달한 구역과 승리 여부 */
-export function playRun(seed: number): { ante: number; stage: number; won: boolean; run: Run } {
-  const run = Run.create(seed);
+export function playRun(seed: number, opts: RunOptions = {}): { ante: number; stage: number; won: boolean; run: Run } {
+  const run = Run.create(seed, opts);
   for (let guard = 0; guard < 100; guard++) {
     playRound(run);
     if (run.s.phase !== 'reward') break;

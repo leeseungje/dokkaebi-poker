@@ -5,7 +5,11 @@ import { charmDef, type CharmInst, sellPrice } from '../core/charms';
 import { consDef, type ConsKey, PACKS, type PackKey } from '../core/consumables';
 import { evaluate, HAND_ORDER, HANDS, handValue } from '../core/hands';
 import { randomSeed } from '../core/rng';
-import { ANTES, MAX_CHARMS, MAX_SELECT, Run, type RunState, STAGE_NAME, type ShopItem } from '../core/run';
+import { ANTES, MAX_SELECT, Run, type RunState, STAGE_NAME, type ShopItem } from '../core/run';
+import { BOSSES } from '../core/bosses';
+import { CHARM_KEYS } from '../core/charms';
+import { MALLETS, SEALS, SPIRITS } from '../core/consumables';
+import { DECK_KEYS, type DeckKey, DECKS, type Edition, EDITION_INFO, STAKES, TAGS, VOUCHERS } from '../core/meta';
 import type { Step } from '../core/scoring';
 import { audio } from './audio';
 import { $, countTo, fmt, fmtMult, h, replay, sleep } from './dom';
@@ -15,6 +19,13 @@ import { $, countTo, fmt, fmtMult, h, replay, sleep } from './dom';
 const SAVE_KEY = 'dokkaebi-poker:run';
 const PREF_KEY = 'dokkaebi-poker:prefs';
 const BEST_KEY = 'dokkaebi-poker:best';
+const RARITY = ['', '흔함', '귀함', '희귀', '전설'];
+interface Best {
+  ante: number;
+  won: number;
+  /** 클리어한 가장 높은 판돈 */
+  stake?: number;
+}
 
 interface Prefs {
   sfx: number;
@@ -82,6 +93,7 @@ const table = h('div', { class: 'table' });
 const actions = h('div', { class: 'actions' });
 const deckPile = h('button', { class: 'deck-pile', title: '덱 보기' });
 const shopEl = h('section', { class: 'shop' });
+const selectEl = h('section', { class: 'blind-select' });
 const layer = h('div', { class: 'layer' });
 const toastEl = h('div', { class: 'toast' });
 
@@ -126,7 +138,7 @@ function buildShell() {
   ui.playBtn.addEventListener('click', () => void doPlay());
   ui.discardBtn.addEventListener('click', () => void doDiscard());
   deckPile.addEventListener('click', () => (audio.button(), showDeck()));
-  stage.append(side, topbar, table, ui.hint, actions, deckPile, shopEl, layer, toastEl);
+  stage.append(side, topbar, table, ui.hint, actions, deckPile, shopEl, selectEl, layer, toastEl);
   document.body.append(stage);
 }
 
@@ -157,7 +169,7 @@ function cardFace(c: Card): HTMLElement {
   if (isWildJoker(c))
     return h(
       'div',
-      { class: 'face joker' + (c.enh ? ' enh-' + c.enh : '') },
+      { class: 'face joker' + (c.enh ? ' enh-' + c.enh : '') + (c.edition ? ' ed-' + c.edition : '') },
       h('div', { class: 'corner tl' }, h('b', null, '★'), h('i', null, 'JK')),
       h('div', { class: 'center figure' }, h('span', { class: 'fig' }, '🃏'), h('small', null, '조커')),
       h('div', { class: 'corner br' }, h('b', null, '★'), h('i', null, 'JK')),
@@ -170,7 +182,7 @@ function cardFace(c: Card): HTMLElement {
   const face = c.rank >= 11 && c.rank <= 13 ? { 11: ['💂', '포졸'], 12: ['👸', '각시'], 13: ['🤴', '사또'] }[c.rank as 11 | 12 | 13] : null;
   return h(
     'div',
-    { class: `face ${red ? 'red' : 'black'}${c.enh ? ` enh-${c.enh}` : ''}` },
+    { class: `face ${red ? 'red' : 'black'}${c.enh ? ` enh-${c.enh}` : ''}${c.edition ? ` ed-${c.edition}` : ''}` },
     h('div', { class: 'corner tl' }, h('b', null, r), h('i', null, SUIT_SYMBOL[c.suit])),
     face
       ? h('div', { class: 'center figure' }, h('span', { class: 'fig' }, face[0]), h('small', null, face[1]))
@@ -340,7 +352,7 @@ function renderSide() {
   ui.discards.textContent = String(s.discardsLeft);
   ui.money.textContent = String(s.money);
   ui.meta.replaceChildren(
-    h('span', null, `구역 ${s.ante}/${ANTES}`),
+    h('span', null, `구역 ${s.ante}/${s.endless ? '∞' : ANTES} · ${STAKES[s.stake - 1].icon}${DECKS[s.deckType].icon}`),
     h('span', { class: 'pips' }, ...[0, 1, 2].map((i) => h('i', { class: i < s.stage ? 'done' : i === s.stage ? 'now' : '' }))),
   );
   const b = bossDef(s.boss);
@@ -359,21 +371,39 @@ function charmTip(c: CharmInst) {
     'div',
     { class: 'tip' },
     h('b', null, `${d.icon} ${d.name}`),
-    h('span', { class: `rar r${d.rarity}` }, ['', '흔함', '귀함', '희귀'][d.rarity]),
+    h('span', { class: `rar r${d.rarity}` }, RARITY[d.rarity]),
+    c.edition ? h('span', { class: `edtag ed-${c.edition}` }, EDITION_INFO[c.edition].name) : null,
     h('p', null, d.desc(c)),
+    c.edition ? h('p', { class: 'dim' }, `${EDITION_INFO[c.edition].name}: ${EDITION_INFO[c.edition].desc}`) : null,
   );
+}
+
+/** 말풍선이 무대 밖으로 잘리지 않도록 안쪽으로 밀어 넣는다 */
+function clampTip(host: HTMLElement) {
+  const tip = host.querySelector<HTMLElement>('.tip');
+  if (!tip) return;
+  tip.style.removeProperty('--tip-dx');
+  requestAnimationFrame(() => {
+    const r = stageRect(tip);
+    if (!r.w) return;
+    const margin = 8;
+    let dx = 0;
+    if (r.x < margin) dx = margin - r.x;
+    else if (r.x + r.w > L.w - margin) dx = L.w - margin - (r.x + r.w);
+    tip.style.setProperty('--tip-dx', `${dx}px`);
+  });
 }
 
 function renderCharms() {
   if (!run) return;
   const s = run.s;
   charmRow.replaceChildren(
-    h('div', { class: 'row-label' }, `부적 ${s.charms.length}/${MAX_CHARMS}`),
+    h('div', { class: 'row-label' }, `부적 ${run.usedCharmSlots}/${run.maxCharms}`),
     ...s.charms.map((c, i) => {
       const d = charmDef(c.key);
       const el = h(
         'div',
-        { class: `charm r${d.rarity}`, 'data-uid': c.uid, tabindex: 0 },
+        { class: `charm r${d.rarity}${c.edition ? ` ed-${c.edition}` : ''}`, 'data-uid': c.uid, tabindex: 0 },
         h('div', { class: 'ico' }, d.icon),
         h('div', { class: 'nm' }, d.name),
         d.start !== undefined ? h('div', { class: 'cnt' }, String(c.n)) : null,
@@ -384,10 +414,10 @@ function renderCharms() {
         audio.button();
         openCharmMenu(c, i, el);
       });
-      el.addEventListener('pointerenter', () => audio.hover());
+      el.addEventListener('pointerenter', () => (audio.hover(), clampTip(el)));
       return el;
     }),
-    ...Array.from({ length: MAX_CHARMS - s.charms.length }, () => h('div', { class: 'charm empty' })),
+    ...Array.from({ length: Math.max(0, run.maxCharms - run.usedCharmSlots) }, () => h('div', { class: 'charm empty' })),
   );
   consRow.replaceChildren(
     h('div', { class: 'row-label' }, `소모품 ${s.consumables.length}/${run.maxCons}`),
@@ -405,7 +435,7 @@ function renderCharms() {
         audio.button();
         openConsMenu(k, i, el);
       });
-      el.addEventListener('pointerenter', () => audio.hover());
+      el.addEventListener('pointerenter', () => (audio.hover(), clampTip(el)));
       return el;
     }),
     ...Array.from({ length: Math.max(0, run.maxCons - s.consumables.length) }, () => h('div', { class: 'cons empty' })),
@@ -571,6 +601,68 @@ function renderPhase() {
   const ph = run.s.phase;
   stage.dataset.phase = ph;
   if (ph === 'shop') renderShop();
+  if (ph === 'select') renderSelect();
+}
+
+// ───────── 판 고르기 (도전 / 건너뛰기)
+
+function renderSelect() {
+  if (!run) return;
+  const s = run.s;
+  const boss = bossDef(s.boss);
+  const cards = [0, 1, 2].map((st) => {
+    const now = st === s.stage;
+    const past = st < s.stage;
+    const isBoss = st === 2;
+    const head = isBoss ? `${boss.icon} ${boss.name}` : STAGE_NAME[st];
+    const body: (HTMLElement | null)[] = [
+      h('div', { class: 'bs-head' }, head),
+      h('div', { class: 'bs-target' }, h('small', null, '목표'), h('b', null, fmt(run!.targetFor(s.ante, st)))),
+      h('div', { class: 'bs-reward' }, `보상 ${run!.rewardFor(st)}냥`),
+      isBoss ? h('p', { class: 'bs-desc' }, boss.desc) : h('p', { class: 'bs-desc dim' }, st === 0 ? '장터 골목 입구의 손님' : '주머니가 두둑한 큰손님'),
+    ];
+    if (now) {
+      body.push(h('button', { class: 'btn primary big', onclick: () => void chooseFight() }, '도전'));
+      if (!isBoss && s.skipTag) {
+        const t = TAGS[s.skipTag];
+        body.push(
+          h(
+            'div',
+            { class: 'bs-skip' },
+            h('div', { class: 'tag' }, h('span', { class: 'tag-ico' }, t.icon), h('div', null, h('b', null, t.name), h('small', null, t.desc))),
+            h('button', { class: 'btn ghost sm', onclick: chooseSkip }, '건너뛰고 노리개 받기'),
+          ),
+        );
+      }
+    } else body.push(h('div', { class: 'bs-state' }, past ? '지나감' : '다음 차례'));
+    return h('div', { class: `bs-card${now ? ' now' : ''}${past ? ' past' : ''}${isBoss ? ' boss' : ''}` }, ...body);
+  });
+  const tags = s.tags.length || s.anteTags.length
+    ? h('div', { class: 'held-tags' }, h('span', null, '가진 노리개'), ...[...s.tags, ...s.anteTags].map((k) => h('span', { class: 'tag-chip', title: TAGS[k].desc }, `${TAGS[k].icon} ${TAGS[k].name}`)))
+    : null;
+  selectEl.replaceChildren(h('div', { class: 'bs-title' }, `${s.ante}구역${s.endless ? ' · 끝없는 장터' : ''}`), h('div', { class: 'bs-row' }, ...cards), ...(tags ? [tags] : []));
+}
+
+async function chooseFight() {
+  if (!run || busy || run.s.phase !== 'select') return;
+  audio.button();
+  run.begin();
+  save();
+  renderAll();
+  audio.shuffle();
+  if (run.isBossStage) await bossIntro();
+  await syncHand();
+}
+
+function chooseSkip() {
+  if (!run || busy) return;
+  const r = run.skip();
+  if ('error' in r) return (audio.error(), toast(r.error));
+  audio.levelUp();
+  audio.coin(0.1, 0.12);
+  toast(`${TAGS[r.tag].icon} ${TAGS[r.tag].name}: ${r.note}`);
+  save();
+  renderAll();
 }
 
 // ───────── 연출 도우미
@@ -701,8 +793,18 @@ async function doPlay() {
     }
     shownHand = shownHand.filter((id) => id !== out.dropped);
   }
+  if (out.droppedAll.length) {
+    toast('각시손이 손패를 모두 쓸어 갔어요!');
+    audio.debuff();
+    out.droppedAll.forEach((id, i) => {
+      const el = cardEls.get(id);
+      if (el) (el.classList.add('back'), place(el, L.w + 140, L.handY + i * 6, 30, 60));
+    });
+    shownHand = shownHand.filter((id) => !out.droppedAll.includes(id));
+  }
+  if (out.stolen) toast(`야차가 ${out.stolen}냥을 빼앗아 갔어요!`);
   await wait(380);
-  for (const id of [...ids, ...(out.dropped !== null ? [out.dropped] : [])]) {
+  for (const id of [...ids, ...out.droppedAll, ...(out.dropped !== null ? [out.dropped] : [])]) {
     cardEls.get(id)?.remove();
     cardEls.delete(id);
   }
@@ -855,7 +957,8 @@ async function roundWon() {
     [`남은 내기 ${rw.plays}번`, rw.plays],
     ...(rw.gold ? ([['금 각인 카드', rw.gold]] as [string, number][]) : []),
     ...(rw.charms ? ([['부적', rw.charms]] as [string, number][]) : []),
-    [`이자 (가진 5냥마다 1냥, 최대 ${run.hasCharm('fortuneBox') ? 10 : 5}냥)`, rw.interest],
+    [`이자 (가진 5냥마다 1냥, 최대 ${run.interestCap}냥)`, rw.interest],
+    ...(rw.bonus ? ([['📈 투자 노리개', rw.bonus]] as [string, number][]) : []),
   ];
   const totalEl = h('b', null, '0');
   const list = h('div', { class: 'reward-rows' });
@@ -924,9 +1027,23 @@ function victory() {
     h('h2', null, '도깨비 대장을 물리쳤어요!'),
     h('p', null, '밤 장터의 패 놀음 왕이 되었어요.'),
     statsBlock(),
-    h('div', { class: 'btn-row' }, h('button', { class: 'btn primary big', onclick: () => (closeLayer(), newRun()) }, '새로 시작'), h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showTitle()) }, '처음 화면')),
+    h(
+      'div',
+      { class: 'btn-row' },
+      h('button', { class: 'btn primary big', onclick: () => (closeLayer(), goEndless()) }, '♾️ 끝없는 장터로 계속'),
+      h('button', { class: 'btn ghost', onclick: () => (closeLayer(), newRun()) }, '새로 시작'),
+      h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showTitle()) }, '처음 화면'),
+    ),
   );
   openLayer(box, false);
+}
+
+function goEndless() {
+  if (!run) return;
+  audio.button();
+  run.continueEndless();
+  save();
+  renderAll();
 }
 
 function statsBlock() {
@@ -944,9 +1061,12 @@ function statsBlock() {
 function recordBest() {
   if (!run) return;
   const s = run.s;
-  const best = storage<{ ante: number; won: number }>(BEST_KEY) ?? { ante: 0, won: 0 };
+  const best = storage<Best>(BEST_KEY) ?? { ante: 0, won: 0 };
   best.ante = Math.max(best.ante, s.ante);
-  if (s.phase === 'won') best.won += 1;
+  if (s.phase === 'won') {
+    best.won += 1;
+    best.stake = Math.max(best.stake ?? 0, s.stake);
+  }
   store(BEST_KEY, best);
 }
 
@@ -974,19 +1094,68 @@ function itemView(it: ShopItem, i: number): HTMLElement {
     : isPack
       ? PACKS[it.key as PackKey].desc
       : consDef(it.key as ConsKey).desc;
-  const kind = isCharm ? '부적' : isPack ? '보따리' : { book: '족보 비급', mallet: '도깨비 방망이', seal: '도장' }[consDef(it.key as ConsKey).kind];
+  const kind = isCharm ? '부적' : isPack ? '보따리' : { book: '족보 비급', mallet: '도깨비 방망이', seal: '도장', spirit: '신령 부적' }[consDef(it.key as ConsKey).kind];
   const buy = h('button', { class: 'btn primary sm', disabled: it.sold || run.s.money < it.price, onclick: () => shopBuy(i) }, it.sold ? '팔림' : isPack ? '열기' : '사기');
   const hag = h('button', { class: 'btn ghost sm', disabled: it.sold || it.haggled, onclick: () => shopHaggle(i) }, it.haggled ? '흥정 끝' : '흥정');
   return h(
     'div',
-    { class: `item ${isCharm ? `charm-item r${rarity}` : isPack ? 'pack-item' : 'cons-item'}${it.sold ? ' sold' : ''}` },
-    h('div', { class: 'kind' }, kind, rarity ? h('span', { class: `rar r${rarity}` }, ['', '흔함', '귀함', '희귀'][rarity]) : null),
+    { class: `item ${isCharm ? `charm-item r${rarity}` : isPack ? 'pack-item' : 'cons-item'}${it.edition ? ` ed-${it.edition}` : ''}${it.sold ? ' sold' : ''}` },
+    h('div', { class: 'kind' }, kind, rarity ? h('span', { class: `rar r${rarity}` }, RARITY[rarity]) : null, it.edition ? h('span', { class: `edtag ed-${it.edition}` }, `${EDITION_INFO[it.edition].name} · ${EDITION_INFO[it.edition].desc}`) : null),
     h('div', { class: 'ico' }, d.icon),
     h('div', { class: 'nm' }, d.name),
     h('p', null, desc),
-    h('div', { class: 'price' }, h('b', null, `${it.price}`), '냥'),
+    h('div', { class: 'price' }, h('b', null, `${isPack && run.s.freePackLeft ? 0 : it.price}`), '냥'),
     h('div', { class: 'item-btns' }, hag, buy),
   );
+}
+
+function voucherView(): HTMLElement {
+  const s = run!.s;
+  const k = s.shopVoucher;
+  const owned = s.vouchers.map((v) => h('span', { class: 'v-chip', title: VOUCHERS[v].desc }, `${VOUCHERS[v].icon} ${VOUCHERS[v].name}`));
+  return h(
+    'div',
+    { class: 'shelf voucher-shelf' },
+    h('div', { class: 'shelf-label' }, '장터 증서 (구역마다 1장)'),
+    k
+      ? h(
+          'div',
+          { class: 'item voucher-item' },
+          h('div', { class: 'kind' }, VOUCHERS[k].needs ? '상위 증서' : '증서'),
+          h('div', { class: 'ico' }, VOUCHERS[k].icon),
+          h('div', { class: 'nm' }, VOUCHERS[k].name),
+          h('p', null, VOUCHERS[k].desc),
+          h('div', { class: 'price' }, h('b', null, String(run!.voucherPrice)), '냥'),
+          h('div', { class: 'item-btns' }, h('button', { class: 'btn primary sm', disabled: s.money < run!.voucherPrice, onclick: buyVoucher }, '사기')),
+        )
+      : h('p', { class: 'dim' }, '이번 구역 증서는 이미 샀어요'),
+    owned.length ? h('div', { class: 'v-owned' }, ...owned) : null,
+  );
+}
+
+function voucherMini(): HTMLElement | null {
+  const k = run!.s.shopVoucher;
+  if (!k) return null;
+  const v = VOUCHERS[k];
+  return h(
+    'div',
+    { class: 'voucher-mini', title: v.desc },
+    h('span', { class: 'vm-ico' }, v.icon),
+    h('div', { class: 'vm-txt' }, h('small', null, v.needs ? '상위 증서' : '장터 증서'), h('b', null, v.name), h('span', null, v.desc)),
+    h('button', { class: 'btn primary sm', disabled: run!.s.money < run!.voucherPrice, onclick: buyVoucher }, `${run!.voucherPrice}냥`),
+  );
+}
+
+function buyVoucher() {
+  if (!run) return;
+  const r = run.buyVoucher();
+  if ('error' in r) return (audio.error(), toast(r.error));
+  audio.buy();
+  audio.levelUp();
+  merchantLine = '좋은 증서여! 두고두고 쓸모 있을 걸세.';
+  toast(`${VOUCHERS[r.key].icon} ${VOUCHERS[r.key].name}: ${VOUCHERS[r.key].desc}`);
+  renderAll();
+  save();
 }
 
 function renderShop() {
@@ -1022,6 +1191,7 @@ function renderShop() {
       { class: 'merchant' },
       h('div', { class: 'merchant-face' }, '👺'),
       h('div', { class: 'bubble' }, merchantLine),
+      voucherMini(),
       h('div', { class: 'shop-title' }, h('b', null, '도깨비 장터'), h('span', null, `${s.ante}구역 요괴: ${thisBoss.icon} ${thisBoss.name}`)),
     ),
     h(
@@ -1030,6 +1200,7 @@ function renderShop() {
       h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '부적'), ...charms.map(([it, i]) => itemView(it, i)), charms.length ? null : h('p', { class: 'dim' }, '부적이 다 팔렸어요')),
       h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '소모품'), ...cons.map(([it, i]) => itemView(it, i))),
       h('div', { class: 'shelf' }, h('div', { class: 'shelf-label' }, '보따리'), ...packs.map(([it, i]) => itemView(it, i))),
+      voucherView(),
     ),
     h(
       'div',
@@ -1137,7 +1308,7 @@ function packOption(o: { kind: string; card?: Card; key?: string }): HTMLElement
       { class: 'opt-thing' },
       h('div', { class: 'ico' }, cd.icon),
       h('b', null, cd.name),
-      h('span', { class: 'rar r' + cd.rarity }, ['', '흔함', '귀함', '희귀'][cd.rarity]),
+      h('span', { class: 'rar r' + cd.rarity }, RARITY[cd.rarity]),
       h('p', null, cd.desc({ key: o.key as never, uid: 0, n: cd.start ?? 0 })),
     );
   }
@@ -1241,14 +1412,10 @@ async function leaveShop() {
   if (!run || busy) return;
   audio.button();
   merchantLine = '';
-  const wasBossNext = run.s.stage === 1;
   run.nextRound();
   renderAll();
   save();
-  audio.shuffle();
-  if (wasBossNext) await bossIntro();
-  else if (run.s.stage === 0) await anteIntro();
-  await syncHand();
+  if (run.s.stage === 0) await anteIntro();
 }
 
 async function bossIntro() {
@@ -1377,7 +1544,7 @@ function showSettings() {
         store(PREF_KEY, prefs);
       }),
       h('div', { class: 'slider' }, h('span', null, '연출 속도'), h('div', { class: 'btn-row' }, ...speedBtns)),
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showHowTo()) }, '하는 방법'), run ? h('button', { class: 'btn danger', onclick: abandon }, '이번 판 포기') : null),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showHowTo()) }, '하는 방법'), h('button', { class: 'btn ghost', onclick: () => showCollection() }, '📚 도감'), run ? h('button', { class: 'btn danger', onclick: abandon }, '이번 판 포기') : null),
     ),
   );
 }
@@ -1397,6 +1564,51 @@ function abandon() {
   openLayer(h('div', { class: 'panel' }, h('h2', null, '이번 판을 포기할까요?'), h('p', null, '진행 중인 기록이 사라져요.'), h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => closeLayer() }, '계속하기'), sure)));
 }
 
+function showCollection(tab = 'charms') {
+  const tabs: [string, string][] = [
+    ['charms', `부적 ${CHARM_KEYS.length}`],
+    ['cons', '소모품'],
+    ['vouchers', '증서'],
+    ['tags', '노리개'],
+    ['bosses', '요괴'],
+    ['decks', '패 묶음·판돈'],
+  ];
+  const row = (ico: string, name: string, desc: string, extra = '') => h('div', { class: 'col-item' }, h('span', { class: 'ci-ico' }, ico), h('div', null, h('b', null, name, extra ? h('span', { class: 'ci-extra' }, extra) : null), h('p', null, desc)));
+  let items: HTMLElement[] = [];
+  if (tab === 'charms')
+    items = [...CHARM_KEYS]
+      .sort((a, b) => charmDef(a).rarity - charmDef(b).rarity)
+      .map((k) => {
+        const d = charmDef(k);
+        return row(d.icon, d.name, d.desc({ key: k, uid: 0, n: d.start ?? 0 }), `${RARITY[d.rarity]} · ${d.price}냥`);
+      });
+  if (tab === 'cons')
+    items = [
+      ...Object.values(MALLETS).map((d) => row(d.icon, d.name, d.desc, '방망이')),
+      ...Object.values(SPIRITS).map((d) => row(d.icon, d.name, d.desc, '신령')),
+      ...Object.values(SEALS).map((d) => row(d.icon, d.name, d.desc, '도장')),
+      ...(['book:all', 'book:big', 'book:pair'] as ConsKey[]).map((k) => row(consDef(k).icon, consDef(k).name, consDef(k).desc, '비급')),
+    ];
+  if (tab === 'vouchers') items = Object.values(VOUCHERS).map((v) => row(v.icon, v.name, v.desc, v.needs ? `상위 (${VOUCHERS[v.needs].name} 필요)` : '기본'));
+  if (tab === 'tags') items = Object.values(TAGS).map((t) => row(t.icon, t.name, t.desc));
+  if (tab === 'bosses') items = Object.values(BOSSES).map((b) => row(b.icon, b.name, b.desc, 'final' in b ? '마지막 요괴' : ''));
+  if (tab === 'decks')
+    items = [
+      ...DECK_KEYS.map((k) => row(DECKS[k].icon, DECKS[k].name, DECKS[k].desc, '패 묶음')),
+      ...STAKES.map((st, i) => row(st.icon, `${i + 1}. ${st.name}`, st.desc, '판돈')),
+      ...(Object.keys(EDITION_INFO) as Edition[]).map((e) => row('✨', EDITION_INFO[e].name, EDITION_INFO[e].desc, '광택')),
+    ];
+  openLayer(
+    h(
+      'div',
+      { class: 'panel collection' },
+      h('h2', null, '📚 도감'),
+      h('div', { class: 'col-tabs' }, ...tabs.map(([k, label]) => h('button', { class: `btn sm ${k === tab ? 'primary' : 'ghost'}`, onclick: () => (audio.button(), showCollection(k)) }, label))),
+      h('div', { class: 'col-list' }, ...items),
+    ),
+  );
+}
+
 function showHowTo() {
   openLayer(
     h(
@@ -1410,6 +1622,9 @@ function showHowTo() {
         h('li', null, h('b', null, '점수 = 끗 × 배'), '. 족보 기본값에 점수에 들어간 카드 숫자가 끗으로 더해져요.'),
         h('li', null, '판을 깨면 냥을 받아 ', h('b', null, '도깨비 장터'), '에서 부적과 소모품을 사요. 물건마다 한 번 ', h('b', null, '흥정'), '할 수 있는데, 깎아 줄 수도 값을 올릴 수도 있어요.'),
         h('li', null, h('b', null, '부적'), '(최대 5장)은 왼쪽부터 차례로 효과를 내요. +배 다음에 ×배가 오도록 순서를 맞추면 점수가 크게 뛰어요.'),
+        h('li', null, h('b', null, '판 고르기'), ': 첫 손님·큰손님 판은 건너뛰고 노리개(보상)를 받을 수 있어요. 요괴 판은 못 건너뛰어요.'),
+        h('li', null, h('b', null, '장터 증서'), ': 구역마다 한 장씩 파는 영구 강화예요. 사면 그 판 내내 효과가 있어요.'),
+        h('li', null, h('b', null, '광택'), ': 금박 +50끗 · 은박 +10배 · 오색 ×1.5배 · 그림자(부적 칸을 차지하지 않음).'),
         h('li', null, h('b', null, '족보 레벨업'), ': 📘 비급을 쓰면 그 족보가 한 단계 올라 끗·배가 커져요. 상점 소모품, 비급 보따리, 푸른 도장에서 얻어요.'),
         h('li', null, h('b', null, '카드 빼기'), ': 상점에서 냥을 내고 덱의 카드를 직접 뺄 수 있어요. ', h('b', null, '조커'), '는 낼 때 가장 좋은 족보가 되도록 아무 카드로나 변해요.'),
         h('li', null, h('b', null, '보따리'), '를 열면 카드를 덱에 넣거나(카드 보따리), 방망이·도장을 덱 카드에 바로 쓸 수 있어요.'),
@@ -1426,7 +1641,7 @@ function showHowTo() {
 function showTitle() {
   stage.dataset.phase = 'title';
   const saved = storage<RunState>(SAVE_KEY);
-  const best = storage<{ ante: number; won: number }>(BEST_KEY);
+  const best = storage<Best>(BEST_KEY);
   const box = h(
     'div',
     { class: 'title-screen' },
@@ -1435,12 +1650,13 @@ function showTitle() {
     h(
       'div',
       { class: 'title-btns' },
-      saved ? h('button', { class: 'btn primary big', onclick: () => continueRun(saved) }, `이어하기 · ${saved.ante}구역 ${STAGE_NAME[saved.stage]}`) : null,
+      saved ? h('button', { class: 'btn primary big', onclick: () => continueRun(saved) }, `이어하기 · ${saved.ante}구역 ${STAGE_NAME[saved.stage] ?? ''}`) : null,
       h('button', { class: `btn ${saved ? 'ghost' : 'primary'} big`, onclick: () => newRun() }, '새로 시작'),
       h('button', { class: 'btn ghost', onclick: () => (audio.unlock(), audio.button(), showHowTo()) }, '하는 방법'),
+      h('button', { class: 'btn ghost', onclick: () => (audio.unlock(), audio.button(), showCollection()) }, '📚 도감'),
       h('button', { class: 'btn ghost', onclick: () => (audio.unlock(), audio.button(), showSettings()) }, '⚙ 설정'),
     ),
-    best ? h('p', { class: 'best' }, `최고 기록: ${best.ante}구역${best.won ? ` · 클리어 ${best.won}번` : ''}`) : null,
+    best ? h('p', { class: 'best' }, `최고 기록: ${best.ante}구역${best.won ? ` · 클리어 ${best.won}번` : ''}${best.stake ? ` · 판돈 ${best.stake}단계 클리어` : ''}`) : null,
   );
   openLayer(box, false);
   layer.classList.add('title');
@@ -1458,9 +1674,9 @@ async function begin() {
   closeLayer();
   clearTable();
   renderAll();
+  if (run!.s.phase === 'select' && run!.s.ante === 1 && run!.s.stage === 0 && run!.s.stats.plays === 0) await anteIntro();
   if (run!.s.phase === 'round') {
     if (run!.isBossStage) await bossIntro();
-    else if (run!.s.stage === 0 && run!.s.ante === 1 && run!.s.stats.plays === 0) await anteIntro();
     await syncHand();
   } else if (run!.s.phase === 'reward') {
     // 보상을 받기 전에 저장된 경우
@@ -1471,9 +1687,67 @@ async function begin() {
 function newRun() {
   startAudio();
   audio.button();
-  run = Run.create(randomSeed());
-  save();
-  void begin();
+  showSetup();
+}
+
+let setupDeck: DeckKey = 'basic';
+let setupStake = 1;
+
+/** 패 묶음과 판돈 고르기 */
+function showSetup() {
+  const best = storage<Best>(BEST_KEY) ?? { ante: 0, won: 0 };
+  const maxStake = Math.min(STAKES.length, (best.stake ?? 0) + 1);
+  if (setupStake > maxStake) setupStake = maxStake;
+  const decks = DECK_KEYS.map((k) =>
+    h(
+      'button',
+      { class: `pick${setupDeck === k ? ' on' : ''}`, onclick: () => ((setupDeck = k), audio.select(true), showSetup()) },
+      h('span', { class: 'pick-ico' }, DECKS[k].icon),
+      h('b', null, DECKS[k].name),
+      h('small', null, DECKS[k].desc),
+    ),
+  );
+  const stakes = STAKES.map((st, i) => {
+    const n = i + 1;
+    const locked = n > maxStake;
+    return h(
+      'button',
+      {
+        class: `stake${setupStake === n ? ' on' : ''}${locked ? ' locked' : ''}`,
+        disabled: locked,
+        title: locked ? '아래 단계를 클리어하면 열려요' : st.desc,
+        onclick: () => ((setupStake = n), audio.select(true), showSetup()),
+      },
+      h('span', null, locked ? '🔒' : st.icon),
+      h('small', null, `${n}`),
+    );
+  });
+  const box = h(
+    'div',
+    { class: 'panel setup' },
+    h('h2', null, '🏮 장터 채비'),
+    h('div', { class: 'setup-label' }, '패 묶음'),
+    h('div', { class: 'pick-grid' }, ...decks),
+    h('div', { class: 'setup-label' }, '판돈 ', h('span', { class: 'dim' }, `(${STAKES[setupStake - 1].name}: 위 단계의 규칙이 모두 더해져요)`)),
+    h('div', { class: 'stake-row' }, ...stakes),
+    h('p', { class: 'stake-desc' }, STAKES.slice(0, setupStake).map((x) => x.desc).filter((x) => x !== '기본 규칙').join(' · ') || '기본 규칙'),
+    h(
+      'div',
+      { class: 'btn-row' },
+      h('button', { class: 'btn ghost', onclick: () => (audio.button(), closeLayer(), showTitle()) }, '뒤로'),
+      h('button', {
+        class: 'btn primary big',
+        onclick: () => {
+          audio.button();
+          run = Run.create(randomSeed(), { deck: setupDeck, stake: setupStake });
+          save();
+          void begin();
+        },
+      }, '장터로!'),
+    ),
+  );
+  layer.classList.remove('title');
+  openLayer(box, false);
 }
 
 function continueRun(state: RunState) {
