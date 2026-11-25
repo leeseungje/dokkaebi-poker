@@ -1443,16 +1443,36 @@ async function anteIntro() {
 
 // ───────── 겹창
 
+/** 닫을 수 있는 창을 다른 창 위에 열면 밑의 창을 기억했다가, 닫을 때 되돌린다 */
+type LayerSave = { el: HTMLElement; closable: boolean; title: boolean };
+const layerStack: LayerSave[] = [];
+let layerClosable = false;
+
 function openLayer(content: HTMLElement, closable = true) {
+  const cur = layer.classList.contains('open') ? (layer.firstElementChild as HTMLElement | null) : null;
+  if (!closable) layerStack.length = 0;
+  else if (cur && cur.className !== content.className) layerStack.push({ el: cur, closable: layerClosable, title: layer.classList.contains('title') });
+  layerClosable = closable;
   layer.replaceChildren(content);
   layer.classList.add('open');
-  layer.onclick = closable ? (e) => e.target === layer && closeLayer() : null;
+  layer.onclick = closable ? (e) => e.target === layer && backLayer() : null;
   if (closable)
     content.prepend(
-      h('button', { class: 'x-btn', onclick: () => (audio.button(), closeLayer()), 'aria-label': '닫기' }, '✕'),
+      h('button', { class: 'x-btn', onclick: () => (audio.button(), backLayer()), 'aria-label': '닫기' }, '✕'),
     );
 }
+/** ✕·바깥 누르기·Esc: 밑에 있던 창(처음 화면, 결과 화면, 설정 등)으로 돌아간다 */
+function backLayer() {
+  const prev = layerStack.pop();
+  if (!prev) return closeLayer();
+  layerClosable = prev.closable;
+  layer.replaceChildren(prev.el);
+  layer.classList.toggle('title', prev.title);
+  layer.onclick = prev.closable ? (e) => e.target === layer && backLayer() : null;
+}
 function closeLayer() {
+  layerStack.length = 0;
+  layerClosable = false;
   layer.classList.remove('open');
   layer.replaceChildren();
 }
@@ -1544,7 +1564,7 @@ function showSettings() {
         store(PREF_KEY, prefs);
       }),
       h('div', { class: 'slider' }, h('span', null, '연출 속도'), h('div', { class: 'btn-row' }, ...speedBtns)),
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => (closeLayer(), showHowTo()) }, '하는 방법'), h('button', { class: 'btn ghost', onclick: () => showCollection() }, '📚 도감'), run ? h('button', { class: 'btn danger', onclick: abandon }, '이번 판 포기') : null),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', onclick: () => showHowTo() }, '하는 방법'), h('button', { class: 'btn ghost', onclick: () => showCollection() }, '📚 도감'), run ? h('button', { class: 'btn danger', onclick: abandon }, '이번 판 포기') : null),
     ),
   );
 }
@@ -1770,7 +1790,7 @@ function save() {
 
 document.addEventListener('keydown', (e) => {
   if (!run || layer.classList.contains('open')) {
-    if (e.key === 'Escape' && layer.classList.contains('open') && !layer.classList.contains('title') && layer.querySelector('.x-btn')) closeLayer();
+    if (e.key === 'Escape' && layer.classList.contains('open') && layer.querySelector('.x-btn')) backLayer();
     return;
   }
   if (e.key === 'Enter') void doPlay();
