@@ -246,9 +246,11 @@ function layoutHand() {
 async function syncHand(animate = true) {
   if (!run) return;
   sortHand();
-  const fresh = run.s.hand.filter((id) => !shownHand.includes(id));
-  for (const [id, el] of cardEls) if (!run.s.hand.includes(id)) (el.remove(), cardEls.delete(id));
-  shownHand = [...run.s.hand];
+  // 손패는 판 중에만 보인다 (상점에서 소모품을 써도 지난 판 손패가 올라오지 않게)
+  const hand = run.s.phase === 'round' ? run.s.hand : [];
+  const fresh = hand.filter((id) => !shownHand.includes(id));
+  for (const [id, el] of cardEls) if (!hand.includes(id)) (el.remove(), cardEls.delete(id));
+  shownHand = [...hand];
   selected = selected.filter((id) => shownHand.includes(id));
   if (animate && fresh.length) {
     for (const id of fresh) {
